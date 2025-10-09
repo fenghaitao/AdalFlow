@@ -93,7 +93,15 @@ class ToEmbeddings(DataComponent):
             enumerate(outputs), desc="Adding embeddings to documents from batch"
         ):
             for idx, embedding in enumerate(batch_output.data):
-                output[batch_idx * self.batch_size + idx].vector = embedding.embedding
+                if hasattr(embedding, 'embedding'):
+                    # Wrapper object format (e.g., some embedders)
+                    output[batch_idx * self.batch_size + idx].vector = embedding.embedding
+                elif isinstance(embedding, list):
+                    # Raw list format (e.g., GitHub Copilot)
+                    output[batch_idx * self.batch_size + idx].vector = embedding
+                else:
+                    # Fallback: try to use embedding directly
+                    output[batch_idx * self.batch_size + idx].vector = embedding
         return output
 
     def _extra_repr(self) -> str:

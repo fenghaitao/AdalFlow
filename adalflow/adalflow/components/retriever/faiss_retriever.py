@@ -283,9 +283,17 @@ class FAISSRetriever(
         # embed the queries, assume the length fits into a batch.
         try:
             embeddings: EmbedderOutputType = self.embedder(valid_queries)
-            queries_embeddings: List[List[float]] = [
-                data.embedding for data in embeddings.data
-            ]
+            queries_embeddings: List[List[float]] = []
+            for data in embeddings.data:
+                if hasattr(data, 'embedding'):
+                    # Wrapper object format (e.g., some embedders)
+                    queries_embeddings.append(data.embedding)
+                elif isinstance(data, list):
+                    # Raw list format (e.g., GitHub Copilot)
+                    queries_embeddings.append(data)
+                else:
+                    # Fallback: try to use data directly
+                    queries_embeddings.append(data)
 
         except Exception as e:
             log.error(f"Error embedding queries: {e}")
