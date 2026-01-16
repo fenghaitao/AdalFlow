@@ -245,14 +245,23 @@ Go to [Documentation](https://adalflow.sylph.ai) for tracing, human-in-the-loop,
 
 
 # Research
+[Sep 2025] [LAD-VF: LLM-Automatic Differentiation Enables Fine-Tuning-Free Robot Planning from Formal Methods Feedback](https://arxiv.org/pdf/2509.18384)
+- Fine-tuning-free robot planning using LLM auto-differentiation
+- Integration of formal methods feedback for robot control
+
 [Jan 2025] [Auto-Differentiating Any LLM Workflow: A Farewell to Manual Prompting](https://arxiv.org/abs/2501.16673)
 - LLM Applications as auto-differentiation graphs
 - Token-efficient and better performance than DsPy
 
+[Dec 2025] [Scaling Textual Gradients via Sampling-Based Momentum](https://arxiv.org/abs/2506.00400)
+- Stable, scalable prompt optimization using momentum-weighted textual gradient
+- Gumbel-Top-k sampling improves exploration and integrates seamlessly with TextGrad, DSPy-COPRO, and AdalFlow
+
+
 
 # Collaborations
 
-We work closely with the [**VITA Group** at University of Texas at Austin](https://vita-group.github.io/), under the leadership of [Dr. Atlas Wang](https://www.ece.utexas.edu/people/faculty/atlas-wang), who provides valuable support in driving project initiatives.
+We work closely with the [**VITA Group** at University of Texas at Austin](https://vita-group.github.io/), under the leadership of [Dr. Atlas Wang](https://www.ece.utexas.edu/people/faculty/atlas-wang) and in collaboration with [Dr. Junyuan Hong](https://jyhong.gitlab.io/), who provides valuable support in driving project initiatives.
 
  <!-- alongside [Dr. Junyuan Hong](https://jyhong.gitlab.io/),  -->
 For collaboration, contact [Li Yin](https://www.linkedin.com/in/li-yin-ai/).
