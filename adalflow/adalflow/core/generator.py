@@ -210,6 +210,24 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
         self._tokenizer: Tokenizer = Tokenizer()
         self._estimated_token_count: int = 0
 
+        self._prompt_builder: Optional[Prompt] = None
+
+    def _get_prompt_builder(self) -> Prompt:
+        r"""Helper to get or create a cached Prompt instance."""
+        if (
+            self._prompt_builder is None
+            or self._prompt_builder.template != self.template
+            or self._prompt_builder.prompt_kwargs is not self.prompt_kwargs
+        ):
+            self._prompt_builder = Prompt(
+                template=self.template, prompt_kwargs=self.prompt_kwargs
+            )
+        return self._prompt_builder
+
+    def update_prompt_kwargs(self, **kwargs):
+        r"""Update the initial prompt kwargs after Generator is initialized."""
+        self.prompt_kwargs.update(kwargs)
+
     @property
     def use_cache(self):
         return self._use_cache
@@ -342,15 +360,15 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
+        prompt = self._get_prompt_builder()
         return prompt.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
+        prompt = self._get_prompt_builder()
         return prompt.call(**kwargs)
 
     def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
+        prompt = self._get_prompt_builder()
         s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
         return s
 

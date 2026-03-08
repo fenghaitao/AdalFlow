@@ -1,0 +1,3 @@
+## 2025-05-14 - Redundant Prompt Instantiation in Generator
+**Learning:** The `Generator` class was creating a new `Prompt` instance on every call to `get_prompt`, `print_prompt`, and `_extra_repr`. Instantiating `Prompt` involves template parsing and variable discovery (via Jinja2 and `meta.find_undeclared_variables`), which is ~45x slower than reusing an existing instance.
+**Action:** Always cache `Prompt` instances within orchestration components like `Generator`. Use identity-based cache invalidation (checking `template` and `prompt_kwargs` references) to ensure the cached prompt stays in sync with component state.
