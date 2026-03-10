@@ -11,7 +11,6 @@ from adalflow.core.default_prompt_template import DEFAULT_ADALFLOW_SYSTEM_PROMPT
 from adalflow.optim.parameter import Parameter
 from adalflow.core.component import DataComponent
 
-
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -145,36 +144,27 @@ class Prompt(DataComponent):
 
         Note:
         - Avoid passing Prompt/Template objects to the prompt kwargs to avoid circular references
-        - Ensure we dont pass used a nested prompt/template in a sequence/dict/list
         """
-        from jinja2 import Template
-
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
 
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
-            return output
+            # 1. filter out the prompt/template objects from kwargs to avoid circular references
+            filtered_kwargs = {
+                k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
+            }
+            return value.call(**filtered_kwargs)
 
         if isinstance(value, Template):
-            output = value.render(**filtered_kwargs)
-            return output
+            # 1. filter out the prompt/template objects from kwargs to avoid circular references
+            filtered_kwargs = {
+                k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
+            }
+            return value.render(**filtered_kwargs)
 
-        # if isinstance(value, str) and ("{{" in value or "{%" in value):
-        #     # Treat raw strings as one‑off templates
-        #     try:
-        #         tpl = get_jinja2_environment().from_string(value)
-        #         return tpl.render(**filtered_kwargs)
-        #     except UndefinedError:
-        #         # leave unresolved – outer template may supply the missing vars
-        #         return value
-        # if isinstance(value, list):
-        #     return [self._deep_render(v, filtered_kwargs) for v in value]
+        if isinstance(value, list):
+            return [self._deep_render(v, kwargs) for v in value]
 
-        # if isinstance(value, dict):
-        #     return {k: self._deep_render(v, filtered_kwargs) for k, v in value.items()}
+        if isinstance(value, dict):
+            return {k: self._deep_render(v, kwargs) for k, v in value.items()}
 
         return value
 
@@ -230,11 +220,10 @@ class Prompt(DataComponent):
     def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
         prompt_kwargs_str: Dict[str, str] = {}
+        has_complex_obj = False
 
         for key, p in prompt_kwargs.items():
-
             if isinstance(p, Parameter):
-
                 prompt_kwargs_str[key] = p.data
             elif isinstance(p, list):
                 prompt_kwargs_str[key] = [
@@ -245,15 +234,26 @@ class Prompt(DataComponent):
                     )
                     for p_elem in p
                 ]
-
             else:
                 prompt_kwargs_str[key] = p
 
+            # check if we need deep rendering
+            if not has_complex_obj:
+                if isinstance(p, (Prompt, Template)):
+                    has_complex_obj = True
+                elif isinstance(p, list):
+                    if any(isinstance(item, (Prompt, Template)) for item in p):
+                        has_complex_obj = True
+                elif isinstance(p, dict):
+                    if any(isinstance(v, (Prompt, Template)) for v in p.values()):
+                        has_complex_obj = True
+
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
-        context_for_render = prompt_kwargs_str.copy()
-        for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+        if has_complex_obj:
+            # Create a copy to avoid circular reference during deep rendering
+            context_for_render = prompt_kwargs_str.copy()
+            for k, v in list(prompt_kwargs_str.items()):
+                prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
 
         return prompt_kwargs_str
 
