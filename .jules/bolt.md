@@ -1,0 +1,3 @@
+## 2025-05-15 - Redundant Prompt Rendering in Generator
+**Learning:** The `Generator` class was calling `get_prompt` multiple times during a single `call`, `acall`, or `forward` pass. Each `get_prompt` call re-instantiated a `Prompt` object, leading to redundant Jinja2 template parsing and variable discovery. This was particularly wasteful in `forward` where it could render the template up to three times.
+**Action:** Implement a cached `_get_prompt_builder` in `Generator` to reuse the `Prompt` instance and refactor call chains to pass the pre-rendered `prompt_str` forward, ensuring the template is rendered only once per execution pass.
