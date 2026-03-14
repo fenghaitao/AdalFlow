@@ -1,0 +1,3 @@
+## 2025-05-15 - [Generator Prompt Rendering Overhead]
+**Learning:** Instantiating a `Prompt` object in AdalFlow is surprisingly expensive (~12ms) because it involves Jinja2 template parsing and environment setup. In high-frequency orchestration like `Generator.call`, creating a new `Prompt` object for every call and rendering it multiple times (for execution and tracing) creates a significant performance bottleneck.
+**Action:** Always cache the `Prompt` instance within orchestrator components and pass pre-rendered prompt strings to sub-methods like `_pre_call` to ensure the template is rendered exactly once per call.
