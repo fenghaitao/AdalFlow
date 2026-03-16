@@ -1,0 +1,3 @@
+## 2025-05-15 - [Generator Prompt Rendering Optimization]
+**Learning:** Significant performance bottleneck was identified in 'Prompt' object instantiation (~1ms-10ms depending on environment) caused by Jinja2 template parsing. Caching the 'Prompt' instance within 'Generator' and avoiding redundant rendering in 'call'/'acall' reduced orchestration overhead by ~20x (from ~2.2ms to ~0.11ms per call).
+**Action:** Always cache 'Prompt' builders when the template is static across calls. Pass pre-rendered prompt strings to internal methods like '_pre_call' to avoid re-rendering. In 'Generator', use identity checks ('is') for 'template' and 'prompt_kwargs' to safely invalidate the cached builder if they are updated by optimizers.
