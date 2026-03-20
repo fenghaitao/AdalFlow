@@ -229,15 +229,24 @@ class Prompt(DataComponent):
 
     def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
+        from jinja2 import Template
         prompt_kwargs_str: Dict[str, str] = {}
+        has_complex_obj = False
+
+        def check_complex(obj: Any) -> bool:
+            if isinstance(obj, (Prompt, Template)):
+                return True
+            if isinstance(obj, list):
+                return any(check_complex(elem) for elem in obj)
+            if isinstance(obj, dict):
+                return any(check_complex(val) for val in obj.values())
+            return False
 
         for key, p in prompt_kwargs.items():
-
             if isinstance(p, Parameter):
-
                 prompt_kwargs_str[key] = p.data
             elif isinstance(p, list):
-                prompt_kwargs_str[key] = [
+                new_list = [
                     (
                         p_elem.data_in_prompt(p_elem)
                         if isinstance(p_elem, Parameter)
@@ -245,9 +254,20 @@ class Prompt(DataComponent):
                     )
                     for p_elem in p
                 ]
-
+                prompt_kwargs_str[key] = new_list
+                if not has_complex_obj:
+                    has_complex_obj = check_complex(new_list)
+            elif isinstance(p, dict):
+                prompt_kwargs_str[key] = p
+                if not has_complex_obj:
+                    has_complex_obj = check_complex(p)
             else:
                 prompt_kwargs_str[key] = p
+                if not has_complex_obj and isinstance(p, (Prompt, Template)):
+                    has_complex_obj = True
+
+        if not has_complex_obj:
+            return prompt_kwargs_str
 
         # Pass‑2: recursively render any templates ── new behaviour
         # Create a copy to avoid circular reference during deep rendering
