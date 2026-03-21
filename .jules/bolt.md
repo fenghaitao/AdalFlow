@@ -1,0 +1,3 @@
+## 2025-05-22 - [Generator Prompt Cache Optimization]
+**Learning:** Instantiating 'Prompt' objects repeatedly within 'Generator' (e.g., in 'get_prompt', 'print_prompt', and '_pre_call') was a significant bottleneck, taking ~1ms per call due to Jinja2 template parsing. Caching the 'Prompt' builder within 'Generator' and using identity-based cache invalidation (via 'is') reduces this overhead by ~35x, providing a measurable 9x speedup for mock LLM calls.
+**Action:** Always check for redundant object creation of core components in high-frequency paths (like generator calls) and implement lazy-initialized caches where appropriate. Use identity checks for cheap cache invalidation of templates and kwargs.
