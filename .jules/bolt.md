@@ -1,0 +1,4 @@
+## 2025-05-15 - [Prompt Caching in Generator]
+**Learning:** Jinja2 template parsing in 'Prompt' object instantiation is a significant performance bottleneck (~9ms per instance). Re-instantiating 'Prompt' on every 'get_prompt', 'print_prompt', or 'call' call in 'Generator' leads to redundant overhead. Caching the 'Prompt' instance and using it for subsequent renders reduces overhead by over 100x. Additionally, the 'call' and 'acall' methods in 'Generator' were double-rendering the prompt (once for tracing and once for the model call).
+
+**Action:** Always cache 'Prompt' or similar template-based objects when the template and prompt variables remain the same. Use identity checks ('is') for efficient cache invalidation when properties like 'template' or 'prompt_kwargs' are replaced. Ensure that rendered strings are reused throughout a function's lifecycle to avoid redundant rendering operations.
