@@ -1,0 +1,3 @@
+## 2025-05-22 - [Generator Prompt Caching]
+**Learning:** Instantiating a `Prompt` object in AdalFlow is expensive due to Jinja2 template parsing and variable discovery (~22ms-45ms for large templates). Re-instantiating it on every `call` or `get_prompt` creates a significant bottleneck, especially since `call` was rendering the prompt twice (once for the span/trace and once for the model call).
+**Action:** Always cache the `Prompt` builder instance within orchestrator components like `Generator`. Use identity checks (`is`) on the template and prompt_kwargs for safe and fast cache invalidation. Pass the pre-rendered `prompt_str` to internal methods like `_pre_call` to avoid redundant rendering passes.
