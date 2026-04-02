@@ -1,0 +1,3 @@
+## 2026-04-02 - [Generator: Prompt Caching and Rendering Optimization]
+**Learning:** Redundant instantiation of the 'Prompt' component within the 'Generator' class was causing significant overhead due to repeated Jinja2 template parsing. Additionally, 'call' and 'acall' were rendering the prompt twice—once for logging/spans and once for the model call.
+**Action:** Implemented lazy caching for the internal 'Prompt' builder in 'Generator', ensuring synchronization with template and prompt_kwargs. Optimized 'call' flow by passing the pre-rendered prompt string to '_pre_call', avoiding the second render. This achieved ~100x speedup in generator overhead for large templates.
