@@ -137,7 +137,7 @@ class Prompt(DataComponent):
     # def __call__(self, *args: Any, **kwds: Any) -> Any:
     #     return self.call(*args, **kwds)
 
-    def _deep_render(self, value: Any, kwargs: Dict[str, Any]) -> Any:
+    def _deep_render(self, value: Any, filtered_kwargs: Dict[str, Any]) -> Any:
         """Recursively render *value* with the same kwargs.
             • If value is another Prompt  → call it with kwargs
             • If value is a jinja2.Template
@@ -149,32 +149,17 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
+        # bolt optimization: return early if not a Prompt or Template
+        if not isinstance(value, (Prompt, Template)):
+            return value
 
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
+            output = value.call(**filtered_kwargs)
             return output
 
         if isinstance(value, Template):
             output = value.render(**filtered_kwargs)
             return output
-
-        # if isinstance(value, str) and ("{{" in value or "{%" in value):
-        #     # Treat raw strings as one‑off templates
-        #     try:
-        #         tpl = get_jinja2_environment().from_string(value)
-        #         return tpl.render(**filtered_kwargs)
-        #     except UndefinedError:
-        #         # leave unresolved – outer template may supply the missing vars
-        #         return value
-        # if isinstance(value, list):
-        #     return [self._deep_render(v, filtered_kwargs) for v in value]
-
-        # if isinstance(value, dict):
-        #     return {k: self._deep_render(v, filtered_kwargs) for k, v in value.items()}
 
         return value
 
@@ -250,8 +235,15 @@ class Prompt(DataComponent):
                 prompt_kwargs_str[key] = p
 
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
-        context_for_render = prompt_kwargs_str.copy()
+        # bolt optimization: pre-filter the context once to avoid O(N^2)
+        # 1. filter out the prompt/template objects from context to avoid circular references
+        from jinja2 import Template
+
+        context_for_render = {
+            k: v
+            for k, v in prompt_kwargs_str.items()
+            if not isinstance(v, (Prompt, Template))
+        }
         for k, v in list(prompt_kwargs_str.items()):
             prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
 
