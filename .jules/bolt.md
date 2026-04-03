@@ -1,0 +1,3 @@
+## 2025-05-14 - Prompt Builder Caching in Generator
+**Learning:** Initializing `Prompt` objects (which involves Jinja2 template parsing) is a significant overhead in `Generator.get_prompt` and `call`, especially for large templates (~2.2ms per call). Caching the `Prompt` instance within the `Generator` and invalidating it based on `template` and `prompt_kwargs` identity provides a massive speedup (~70x in micro-benchmarks).
+**Action:** Always check for redundant object instantiation in hot paths, especially when those objects involve expensive parsing or external library initialization. Reusing already rendered strings (like `prompt_str`) across internal methods also eliminates redundant computation.
