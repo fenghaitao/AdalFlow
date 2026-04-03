@@ -149,17 +149,15 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
+        if not isinstance(value, (Prompt, Template)):
+            return value
 
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
+            output = value.call(**kwargs)
             return output
 
         if isinstance(value, Template):
-            output = value.render(**filtered_kwargs)
+            output = value.render(**kwargs)
             return output
 
         # if isinstance(value, str) and ("{{" in value or "{%" in value):
@@ -252,8 +250,17 @@ class Prompt(DataComponent):
         # Pass‑2: recursively render any templates ── new behaviour
         # Create a copy to avoid circular reference during deep rendering
         context_for_render = prompt_kwargs_str.copy()
+
+        # filter out the prompt/template objects from kwargs to avoid circular references
+        # and do it once here instead of in _deep_render to avoid O(N^2) complexity
+        filtered_kwargs = {
+            k: v
+            for k, v in context_for_render.items()
+            if not isinstance(v, (Prompt, Template))
+        }
+
         for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+            prompt_kwargs_str[k] = self._deep_render(v, filtered_kwargs)
 
         return prompt_kwargs_str
 
