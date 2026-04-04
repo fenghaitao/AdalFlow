@@ -36,7 +36,14 @@ from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
 
-ExcludeType = Optional[Dict[str, List[str]]]
+ExcludeType = Optional[Dict[str, Union[List[str], Set[str]]]]
+
+# Pre-compiled regex patterns for performance
+MALFORMED_JSON_PATTERN = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
+JSON_MARKDOWN_PATTERN = re.compile(
+    r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
+)
+YAML_RE_PATTERN = re.compile(r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL)
 T_co = TypeVar("T_co", covariant=True)
 
 
@@ -60,14 +67,26 @@ def custom_asdict(
     """
     if not is_dataclass_instance(obj):
         raise TypeError("custom_asdict() should be called on dataclass instances")
-    return _asdict_inner(obj, dict_factory, exclude or {})
+
+    # Optimization: Convert exclusion lists to sets for O(1) lookups
+    processed_exclude = {}
+    if exclude:
+        for cls_name, fields_to_exclude in exclude.items():
+            if isinstance(fields_to_exclude, (list, tuple)):
+                processed_exclude[cls_name] = set(fields_to_exclude)
+            else:
+                processed_exclude[cls_name] = fields_to_exclude
+
+    return _asdict_inner(obj, dict_factory, processed_exclude)
 
 
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
+        # Optimization: use set for O(1) field exclusion lookup
+        current_exclude = exclude.get(obj.__class__.__name__, set())
         for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+            if f.name in current_exclude:
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
@@ -1096,10 +1115,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
-    malformed_match = malformed_pattern.match(text)
+    malformed_match = MALFORMED_JSON_PATTERN.match(text)
     if malformed_match and text.endswith('```}'):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
@@ -1111,10 +1127,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
     # extracting embedded code blocks within JSON string values
-    json_markdown_pattern = re.compile(
-        r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
-    )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = JSON_MARKDOWN_PATTERN.match(text)  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1230,10 +1243,7 @@ def extract_yaml_str(text: str) -> str:
         ValueError: If no YAML string is found in the text.
     """
     try:
-        yaml_re_pattern: re.Pattern = re.compile(
-            r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
-        )
-        match = yaml_re_pattern.search(text.strip())
+        match = YAML_RE_PATTERN.search(text.strip())
 
         yaml_str = ""
         if match:
