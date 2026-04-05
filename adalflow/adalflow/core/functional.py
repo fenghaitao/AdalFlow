@@ -36,8 +36,21 @@ from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
 
-ExcludeType = Optional[Dict[str, List[str]]]
+ExcludeType = Optional[Dict[str, Union[List[str], Set[str]]]]
 T_co = TypeVar("T_co", covariant=True)
+
+# Pre-compiled regular expressions for performance
+_INT_PATTERN = re.compile(r"\b\d+\b")
+_FLOAT_PATTERN = re.compile(r"\b\d+(\.\d+)?\b")
+_BOOLEAN_PATTERN = re.compile(r"\b(?:true|false|True|False)\b")
+_JSON_MALFORMED_PATTERN = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
+_JSON_MARKDOWN_PATTERN = re.compile(
+    r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
+)
+_YAML_RE_PATTERN = re.compile(
+    r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
+)
+_JSON_MISSING_COMMA_PATTERN = re.compile(r'(?<=[}\]"\'\d])(\s+)(?=[\{"\[])')
 
 
 ########################################################################################
@@ -60,14 +73,22 @@ def custom_asdict(
     """
     if not is_dataclass_instance(obj):
         raise TypeError("custom_asdict() should be called on dataclass instances")
-    return _asdict_inner(obj, dict_factory, exclude or {})
+
+    # Optimization: Convert exclusion lists to sets for O(1) lookup
+    processed_exclude = {}
+    if exclude:
+        for cls_name, fields_to_exclude in exclude.items():
+            processed_exclude[cls_name] = set(fields_to_exclude)
+
+    return _asdict_inner(obj, dict_factory, processed_exclude)
 
 
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
+        current_exclude = exclude.get(obj.__class__.__name__, set())
         for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+            if f.name in current_exclude:
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
@@ -962,7 +983,7 @@ def extract_first_int(text: str) -> int:
     Raises:
         ValueError: If no integer is found in the text.
     """
-    match = re.search(r"\b\d+\b", text)
+    match = _INT_PATTERN.search(text)
     if match:
         return int(match.group())
     raise ValueError("No integer found in the text.")
@@ -980,7 +1001,7 @@ def extract_first_float(text: str) -> float:
     Raises:
         ValueError: If no float is found in the text.
     """
-    match = re.search(r"\b\d+(\.\d+)?\b", text)
+    match = _FLOAT_PATTERN.search(text)
 
     if match:
         return float(match.group())
@@ -999,7 +1020,7 @@ def extract_first_boolean(text: str) -> bool:
     Raises:
         ValueError: If no boolean is found in the text.
     """
-    match = re.search(r"\b(?:true|false|True|False)\b", text)
+    match = _BOOLEAN_PATTERN.search(text)
     if match:
         return match.group().lower() == "true"
     raise ValueError("No boolean found in the text.")
@@ -1055,10 +1076,10 @@ def extract_function_expression(
 
 def _is_valid_json_str(text: str) -> bool:
     """Helper function to check if a string is valid JSON.
-    
+
     Args:
         text (str): The text to validate as JSON.
-        
+
     Returns:
         bool: True if the text is valid JSON, False otherwise.
     """
@@ -1089,32 +1110,28 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     """
     # NOTE: this regex parsing is taken from langchain.output_parsers.pydantic
     text = text.strip()
-    
+
     # First check if the text is already a valid JSON string
     if _is_valid_json_str(text):
         return text
-    
+
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
-    malformed_match = malformed_pattern.match(text)
-    if malformed_match and text.endswith('```}'):
+    malformed_match = _JSON_MALFORMED_PATTERN.match(text)
+    if malformed_match and text.endswith("```}"):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
         # Validate using helper function
         if _is_valid_json_str(potential_json):
             return potential_json
-    
+
     # Then check if the JSON is wrapped in markdown code blocks
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
     # extracting embedded code blocks within JSON string values
-    json_markdown_pattern = re.compile(
-        r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
-    )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = _JSON_MARKDOWN_PATTERN.match(
+        text
+    )  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1123,7 +1140,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
             return json_content
         # If not valid, continue with the extraction logic on the markdown content
         text = json_content
-    
+
     start_obj = text.find("{")
     start_arr = text.find("[")
     if start_obj == -1 and start_arr == -1:
@@ -1159,7 +1176,9 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
 
     extracted_json = text[start : end + 1]
 
-    return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
+    return (
+        extracted_json.strip()
+    )  # Return the extracted JSON string without leading/trailing spaces
 
 
 def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
@@ -1230,10 +1249,7 @@ def extract_yaml_str(text: str) -> str:
         ValueError: If no YAML string is found in the text.
     """
     try:
-        yaml_re_pattern: re.Pattern = re.compile(
-            r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
-        )
-        match = yaml_re_pattern.search(text.strip())
+        match = _YAML_RE_PATTERN.search(text.strip())
 
         yaml_str = ""
         if match:
@@ -1247,11 +1263,8 @@ def extract_yaml_str(text: str) -> str:
 
 def fix_json_missing_commas(json_str: str) -> str:
     # Example: adding missing commas, only after double quotes
-    # Regular expression to find missing commas
-    regex = r'(?<=[}\]"\'\d])(\s+)(?=[\{"\[])'
-
     # Add commas where missing
-    fixed_json_str = re.sub(regex, r",\1", json_str)
+    fixed_json_str = _JSON_MISSING_COMMA_PATTERN.sub(r",\1", json_str)
 
     return fixed_json_str
 
@@ -1328,13 +1341,13 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
 ########################################################################################
 def encode_image(image_path: str) -> str:
     """Encode an image file to base64 string.
-    
+
     Args:
         image_path (str): Path to the image file.
-        
+
     Returns:
         str: Base64 encoded string of the image.
-        
+
     Raises:
         FileNotFoundError: If the image file does not exist.
         PermissionError: If there's no permission to read the file.
@@ -1346,7 +1359,9 @@ def encode_image(image_path: str) -> str:
     except FileNotFoundError:
         raise FileNotFoundError(f"Image file not found: {image_path}")
     except PermissionError:
-        raise PermissionError(f"Permission denied when reading image file: {image_path}")
+        raise PermissionError(
+            f"Permission denied when reading image file: {image_path}"
+        )
     except Exception as e:
         raise Exception(f"Error encoding image {image_path}: {str(e)}")
 
