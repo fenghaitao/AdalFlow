@@ -1,0 +1,3 @@
+## 2025-05-20 - [Optimizing Core Functional Utilities]
+**Learning:** Pre-compiling regular expressions as module-level constants significantly reduces latency in text-parsing functions by avoiding redundant compilation or cache lookups. In recursive functions like `_asdict_inner`, retrieving metadata (e.g., class-specific exclusion lists) once per instance instead of within the field iteration loop provides minor but consistent efficiency gains.
+**Action:** Always pre-compile regex for frequently used patterns. Move constant lookups outside of hot loops in recursive functions to minimize dictionary overhead.
