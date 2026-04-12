@@ -1,0 +1,3 @@
+## 2026-04-12 - [Prompt Builder Caching in Generator]
+**Learning:** Jinja2 template parsing during 'Prompt' instantiation is a significant bottleneck (up to ~20ms for complex templates). Repeatedly creating 'Prompt' objects in 'Generator.call' for every request introduces substantial latency. Additionally, rendering the same prompt twice (once for logging/tracing and once for the actual model call) adds redundant overhead.
+**Action:** Implement a caching mechanism for the 'Prompt' builder within 'Generator' using object identity checks for cache invalidation. Pass the pre-rendered prompt string to the internal '_pre_call' method to eliminate double-rendering.
