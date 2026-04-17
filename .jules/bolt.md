@@ -1,0 +1,4 @@
+## 2025-05-22 - Optimize Generator prompt rendering and caching
+**Learning:** In AdalFlow's `Component`-based architecture, `Prompt` instantiation is relatively expensive (up to ~2.2ms for large templates) due to Jinja2 template parsing. Re-instantiating `Prompt` on every `Generator.call` or `repr` creates significant overhead. Additionally, `Generator.call` and `acall` performed redundant rendering (once for tracing/spans and once in `_pre_call`).
+
+**Action:** Implement lazy caching for internal `Prompt` builders in `Generator`. Use `object.__setattr__` to store the cached builder to avoid auto-registration as a sub-component by the `Component` base class. Ensure cache invalidation by overriding `__setattr__` for `template` and `prompt_kwargs`. Pass pre-rendered `prompt_str` into the execution pipeline to eliminate double-rendering.
