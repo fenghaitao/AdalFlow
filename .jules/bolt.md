@@ -1,0 +1,3 @@
+## 2025-05-14 - [Generator Performance Optimization]
+**Learning:** Re-instantiating the `Prompt` object on every `Generator.get_prompt` or `call` is expensive (up to ~22ms for large templates) because it triggers Jinja2 template parsing and environment setup every time. Furthermore, `Generator.call` was double-rendering the prompt by calling `get_prompt` and then `_pre_call` (which also called `get_prompt`).
+**Action:** Use a lazily-initialized cached `Prompt` instance within `Generator`. Invalidate this cache in `__setattr__` when `template` or `prompt_kwargs` change. Pass the rendered prompt string to `_pre_call` to avoid redundant rendering.
