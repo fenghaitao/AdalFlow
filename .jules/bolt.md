@@ -1,0 +1,3 @@
+## 2025-05-15 - [Prompt Rendering and Generator Overhead]
+**Learning:** O(N²) complexity in prompt rendering was caused by redundant filtering of keyword arguments in recursive `_deep_render` calls. Additionally, redundant `Prompt` instantiation and double-rendering in `Generator` added significant latency (~2ms) to every LLM call.
+**Action:** Pre-filter keyword arguments once at the start of rendering. Implement lazy initialization and caching of the `Prompt` builder in `Generator`. Pass rendered prompt strings forward to avoid double rendering. Use `object.__setattr__` to store internal caches in `Component` subclasses to avoid accidental registration.
