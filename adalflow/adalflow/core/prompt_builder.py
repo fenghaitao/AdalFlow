@@ -149,18 +149,11 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
-
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
-            return output
+            return value.call(**kwargs)
 
         if isinstance(value, Template):
-            output = value.render(**filtered_kwargs)
-            return output
+            return value.render(**kwargs)
 
         # if isinstance(value, str) and ("{{" in value or "{%" in value):
         #     # Treat raw strings as one‑off templates
@@ -229,12 +222,12 @@ class Prompt(DataComponent):
 
     def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
+        from jinja2 import Template
+
         prompt_kwargs_str: Dict[str, str] = {}
 
         for key, p in prompt_kwargs.items():
-
             if isinstance(p, Parameter):
-
                 prompt_kwargs_str[key] = p.data
             elif isinstance(p, list):
                 prompt_kwargs_str[key] = [
@@ -245,15 +238,28 @@ class Prompt(DataComponent):
                     )
                     for p_elem in p
                 ]
-
             else:
                 prompt_kwargs_str[key] = p
 
         # Pass‑2: recursively render any templates ── new behaviour
+        # Optimization: Only filter and deep render if there are actually nested prompts/templates.
+        # This avoids O(N^2) complexity for large prompt_kwargs.
+        has_nested = any(
+            isinstance(v, (Prompt, Template)) for v in prompt_kwargs_str.values()
+        )
+        if not has_nested:
+            return prompt_kwargs_str
+
         # Create a copy to avoid circular reference during deep rendering
         context_for_render = prompt_kwargs_str.copy()
-        for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+        # Filter once here to avoid redundant filtering in _deep_render
+        filtered_kwargs = {
+            k: v for k, v in context_for_render.items() if not isinstance(v, (Prompt, Template))
+        }
+
+        for k, v in prompt_kwargs_str.items():
+            if isinstance(v, (Prompt, Template)):
+                prompt_kwargs_str[k] = self._deep_render(v, filtered_kwargs)
 
         return prompt_kwargs_str
 
