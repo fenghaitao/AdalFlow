@@ -137,7 +137,7 @@ class Prompt(DataComponent):
     # def __call__(self, *args: Any, **kwds: Any) -> Any:
     #     return self.call(*args, **kwds)
 
-    def _deep_render(self, value: Any, kwargs: Dict[str, Any]) -> Any:
+    def _deep_render(self, value: Any, filtered_kwargs: Dict[str, Any]) -> Any:
         """Recursively render *value* with the same kwargs.
             • If value is another Prompt  → call it with kwargs
             • If value is a jinja2.Template
@@ -147,34 +147,12 @@ class Prompt(DataComponent):
         - Avoid passing Prompt/Template objects to the prompt kwargs to avoid circular references
         - Ensure we dont pass used a nested prompt/template in a sequence/dict/list
         """
-        from jinja2 import Template
-
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
-
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
-            return output
+            return value.call(**filtered_kwargs)
 
+        from jinja2 import Template
         if isinstance(value, Template):
-            output = value.render(**filtered_kwargs)
-            return output
-
-        # if isinstance(value, str) and ("{{" in value or "{%" in value):
-        #     # Treat raw strings as one‑off templates
-        #     try:
-        #         tpl = get_jinja2_environment().from_string(value)
-        #         return tpl.render(**filtered_kwargs)
-        #     except UndefinedError:
-        #         # leave unresolved – outer template may supply the missing vars
-        #         return value
-        # if isinstance(value, list):
-        #     return [self._deep_render(v, filtered_kwargs) for v in value]
-
-        # if isinstance(value, dict):
-        #     return {k: self._deep_render(v, filtered_kwargs) for k, v in value.items()}
+            return value.render(**filtered_kwargs)
 
         return value
 
@@ -227,14 +205,14 @@ class Prompt(DataComponent):
         output = super().to_dict(exclude=exclude)
         return output
 
-    def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
+    def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, Any]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
-        prompt_kwargs_str: Dict[str, str] = {}
+        prompt_kwargs_str: Dict[str, Any] = {}
+        has_nested_template = False
+        from jinja2 import Template
 
         for key, p in prompt_kwargs.items():
-
             if isinstance(p, Parameter):
-
                 prompt_kwargs_str[key] = p.data
             elif isinstance(p, list):
                 prompt_kwargs_str[key] = [
@@ -245,15 +223,26 @@ class Prompt(DataComponent):
                     )
                     for p_elem in p
                 ]
-
             else:
                 prompt_kwargs_str[key] = p
 
+            if not has_nested_template and isinstance(p, (Prompt, Template)):
+                has_nested_template = True
+
+        if not has_nested_template:
+            return prompt_kwargs_str
+
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
-        context_for_render = prompt_kwargs_str.copy()
-        for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+        # Pre-filter to avoid O(N^2) complexity in recursive calls
+        filtered_kwargs = {
+            k: v
+            for k, v in prompt_kwargs_str.items()
+            if not isinstance(v, (Prompt, Template))
+        }
+
+        for k, v in prompt_kwargs_str.items():
+            if isinstance(v, (Prompt, Template)):
+                prompt_kwargs_str[k] = self._deep_render(v, filtered_kwargs)
 
         return prompt_kwargs_str
 
