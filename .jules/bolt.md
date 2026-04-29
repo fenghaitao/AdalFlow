@@ -1,0 +1,3 @@
+## 2025-05-15 - [O(N^2) Complexity in Prompt rendering and Redundant Builder Instantiation]
+**Learning:** Found O(N^2) complexity in `Prompt._convert_prompt_kwargs_to_str` because it was pre-filtering all kwargs for every single kwarg that needed rendering. Additionally, `Generator` was instantiating a new `Prompt` object (triggering Jinja2 parsing) on every `get_prompt` call, which is expensive.
+**Action:** Pre-filter kwargs once before rendering. Cache the `Prompt` builder in `Generator` and use `object.__setattr__` to avoid `Component` registry overhead and infinite recursion in `__setattr__`.
