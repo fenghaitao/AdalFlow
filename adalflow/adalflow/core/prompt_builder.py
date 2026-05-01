@@ -11,7 +11,6 @@ from adalflow.core.default_prompt_template import DEFAULT_ADALFLOW_SYSTEM_PROMPT
 from adalflow.optim.parameter import Parameter
 from adalflow.core.component import DataComponent
 
-
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -137,7 +136,7 @@ class Prompt(DataComponent):
     # def __call__(self, *args: Any, **kwds: Any) -> Any:
     #     return self.call(*args, **kwds)
 
-    def _deep_render(self, value: Any, kwargs: Dict[str, Any]) -> Any:
+    def _deep_render(self, value: Any, filtered_kwargs: Dict[str, Any]) -> Any:
         """Recursively render *value* with the same kwargs.
             • If value is another Prompt  → call it with kwargs
             • If value is a jinja2.Template
@@ -149,13 +148,8 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
-
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
+            output = value.call(**filtered_kwargs)
             return output
 
         if isinstance(value, Template):
@@ -229,12 +223,16 @@ class Prompt(DataComponent):
 
     def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
+        from jinja2 import Template
+
         prompt_kwargs_str: Dict[str, str] = {}
+        has_templates = False
 
         for key, p in prompt_kwargs.items():
-
-            if isinstance(p, Parameter):
-
+            if isinstance(p, (Prompt, Template)):
+                has_templates = True
+                prompt_kwargs_str[key] = p
+            elif isinstance(p, Parameter):
                 prompt_kwargs_str[key] = p.data
             elif isinstance(p, list):
                 prompt_kwargs_str[key] = [
@@ -245,15 +243,24 @@ class Prompt(DataComponent):
                     )
                     for p_elem in p
                 ]
-
             else:
                 prompt_kwargs_str[key] = p
 
+        if not has_templates:
+            return prompt_kwargs_str
+
         # Pass‑2: recursively render any templates ── new behaviour
         # Create a copy to avoid circular reference during deep rendering
-        context_for_render = prompt_kwargs_str.copy()
+        # And filter out Prompt/Template objects once to avoid O(N^2) in _deep_render
+        filtered_context = {
+            k: v
+            for k, v in prompt_kwargs_str.items()
+            if not isinstance(v, (Prompt, Template))
+        }
+
         for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+            if isinstance(v, (Prompt, Template)):
+                prompt_kwargs_str[k] = self._deep_render(v, filtered_context)
 
         return prompt_kwargs_str
 
