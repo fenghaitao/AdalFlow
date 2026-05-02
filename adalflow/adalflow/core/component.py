@@ -30,7 +30,6 @@ from adalflow.utils.config import new_component
 
 from adalflow.utils.registry import EntityMapping
 
-
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -844,44 +843,61 @@ class Component:
     #     return self
 
     def __setattr__(self, name: str, value: Any) -> None:
+        # Fast path for common private attributes used in __init__
+        if name in {
+            "_components",
+            "_parameters",
+            "training",
+            "teacher_mode",
+            "tracing",
+            "name",
+            "_init_args",
+        }:
+            object.__setattr__(self, name, value)
+            return
+
         from adalflow.optim.parameter import Parameter
 
-        def remove_from(*dicts_or_sets):
-            for d in dicts_or_sets:
-                if name in d:
-                    if isinstance(d, dict):
-                        del d[name]
-                    else:
-                        d.discard(name)
-
-        # set parameter
-        params = self.__dict__.get("_parameters")
+        # 1. Handle Parameter assignment
         if isinstance(value, Parameter):
+            params = self.__dict__.get("_parameters")
             if params is None:
                 raise AttributeError(
                     "cant assign parameter before Component.__init__() call"
                 )
-            remove_from(self.__dict__)
+            if name in self.__dict__:
+                del self.__dict__[name]
             self.register_parameter(name, value)
-        elif params is not None and name in params:
+            return
+
+        # 2. Handle existing Parameter update
+        params = self.__dict__.get("_parameters")
+        if params is not None and name in params:
             if value is not None:
                 raise TypeError(
                     f"cannot assign '{type(value)}' object to parameter '{name}' (Parameter or None required)"
                 )
-            self.register_parameter(name, value)
-        else:  # set component
+            params[name] = value
+            return
 
+        # 3. Handle Component assignment
+        if isinstance(value, Component):
             components = self.__dict__.get("_components")
-            if isinstance(value, Component):
-                if components is None:
-                    raise AttributeError(
-                        "cant assign component before Component.__init__() call"
-                    )
-                remove_from(self.__dict__)
-                components[name] = value
+            if components is None:
+                raise AttributeError(
+                    "cant assign component before Component.__init__() call"
+                )
+            if name in self.__dict__:
+                del self.__dict__[name]
+            components[name] = value
+            return
 
-            else:  # set attribute
-                super().__setattr__(name, value)
+        # 4. Handle standard attribute assignment
+        components = self.__dict__.get("_components")
+        if components is not None and name in components:
+            del components[name]
+
+        object.__setattr__(self, name, value)
 
     def __getattr__(self, name: str) -> Any:
         if "_parameters" in self.__dict__:
