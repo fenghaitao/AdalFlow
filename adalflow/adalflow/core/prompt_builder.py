@@ -229,6 +229,8 @@ class Prompt(DataComponent):
 
     def _convert_prompt_kwargs_to_str(self, prompt_kwargs: Dict) -> Dict[str, str]:
         r"""Convert the prompt_kwargs to a dictionary with string values."""
+        from jinja2 import Template
+
         prompt_kwargs_str: Dict[str, str] = {}
 
         for key, p in prompt_kwargs.items():
@@ -250,10 +252,21 @@ class Prompt(DataComponent):
                 prompt_kwargs_str[key] = p
 
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
+        # Optimization: Provide a fast-path when no templates/prompts are present
+        # to avoid O(N^2) complexity from calling deep_render on every argument.
+
+        # Fast-path check: See if any item is a Prompt or Template object.
+        # This allows us to skip the copy and loop for most standard prompt calls.
+        has_templates = any(isinstance(v, (Prompt, Template)) for v in prompt_kwargs_str.values())
+
+        if not has_templates:
+            return prompt_kwargs_str
+
+        # Recursive rendering for cases where Prompt or Template objects ARE present.
         context_for_render = prompt_kwargs_str.copy()
-        for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+        for k, v in prompt_kwargs_str.items():
+            if isinstance(v, (Prompt, Template)):
+                prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
 
         return prompt_kwargs_str
 
