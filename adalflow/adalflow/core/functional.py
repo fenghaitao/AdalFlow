@@ -27,6 +27,7 @@ import yaml
 import ast
 import threading
 import base64
+import weakref
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -35,6 +36,9 @@ from pydantic import BaseModel
 from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
+
+# Cache for dataclass fields to avoid redundant calls to fields(obj)
+_FIELDS_CACHE = weakref.WeakKeyDictionary()
 
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
@@ -66,8 +70,11 @@ def custom_asdict(
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
-        for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+        cls = obj.__class__
+        if cls not in _FIELDS_CACHE:
+            _FIELDS_CACHE[cls] = fields(cls)
+        for f in _FIELDS_CACHE[cls]:
+            if f.name in exclude.get(cls.__name__, []):
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
