@@ -41,6 +41,11 @@ def test_extract_json_str_no_json():
         extract_json_str(text)
 
 
+def test_extract_json_str_with_braces_in_string():
+    text = 'Here is some JSON: {"key": "value with } brace"} and some trailing text.'
+    assert extract_json_str(text) == '{"key": "value with } brace"}'
+
+
 def test_extract_list_json_str():
     text = '["item1", "item2"]'
     assert extract_json_str(text) == '["item1", "item2"]', "Failed to extract list"

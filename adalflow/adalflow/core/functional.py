@@ -1134,30 +1134,34 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
         start_arr if start_arr != -1 else float("inf"),
     )
     open_brace = text[start]
-    # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
+    # Attempt to find the matching closing brace using json.JSONDecoder first (more accurate)
+    try:
+        _, end_idx = json.JSONDecoder().raw_decode(text, start)
+        end = end_idx - 1
+    except json.JSONDecodeError:
+        # Fallback to manual brace counting if raw_decode fails (e.g. malformed but recoverable)
+        brace_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == open_brace:
+                brace_count += 1
+            elif text[i] == ("}" if open_brace == "{" else "]"):
+                brace_count -= 1
 
-        if brace_count == 0:
-            end = i
-            break
+            if brace_count == 0:
+                end = i
+                break
 
     if end == -1 and add_missing_right_brace:
         # If no closing brace is found, but we are allowed to add one
         log.debug("Adding missing right brace to the JSON string.")
-        text += "}" if open_brace == "{" else "]"
-        end = len(text) - 1
+        extracted_json = text[start:] + ("}" if open_brace == "{" else "]")
     elif end == -1:
         raise ValueError(
             "Incomplete JSON object found and add_missing_right_brace is False."
         )
-
-    extracted_json = text[start : end + 1]
+    else:
+        extracted_json = text[start : end + 1]
 
     return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
 
