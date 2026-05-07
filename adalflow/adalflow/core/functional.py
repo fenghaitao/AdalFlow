@@ -27,6 +27,7 @@ import yaml
 import ast
 import threading
 import base64
+import weakref
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -35,6 +36,10 @@ from pydantic import BaseModel
 from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
+
+# Cache for dataclass fields to avoid repeated introspection overhead.
+# WeakKeyDictionary ensures classes can be garbage collected.
+_FIELDS_CACHE = weakref.WeakKeyDictionary()
 
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
@@ -65,9 +70,15 @@ def custom_asdict(
 
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
+        cls = obj.__class__
+        flds = _FIELDS_CACHE.get(cls)
+        if flds is None:
+            flds = fields(obj)
+            _FIELDS_CACHE[cls] = flds
+
         result = []
-        for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+        for f in flds:
+            if f.name in exclude.get(cls.__name__, []):
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
@@ -509,7 +520,12 @@ def get_dataclass_schema(
         schema["type"] = get_type_schema(cls, exclude, type_var_map)
         return schema
 
-    for f in fields(cls):
+    flds = _FIELDS_CACHE.get(cls)
+    if flds is None:
+        flds = fields(cls)
+        _FIELDS_CACHE[cls] = flds
+
+    for f in flds:
         if f.name in current_exclude:
             continue
         # prepare field schema, it weill be done recursively for nested dataclasses
