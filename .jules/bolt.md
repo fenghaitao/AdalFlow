@@ -1,0 +1,3 @@
+## 2025-05-15 - [Prompt rendering O(N^2) complexity]
+**Learning:** The `_convert_prompt_kwargs_to_str` method in the `Prompt` class had O(N^2) complexity because it rebuilt a filtered context dictionary (for recursive rendering) for every single keyword argument. This became a major bottleneck when prompts had hundreds or thousands of variables (e.g., in complex RAG or agent workflows).
+**Action:** Pre-calculate the filtered context once per call and pass it to a modified `_deep_render`. Also, add a fast-path to skip the rendering pass entirely if no nested `Prompt` or `Template` objects are detected in the first pass.
