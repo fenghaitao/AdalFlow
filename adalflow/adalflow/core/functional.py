@@ -1135,29 +1135,35 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     )
     open_brace = text[start]
     # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
+    # 1. Try to use json.JSONDecoder.raw_decode for better performance and robustness
+    try:
+        candidate = text[start:]
+        _, end_pos = json.JSONDecoder().raw_decode(candidate)
+        extracted_json = candidate[:end_pos]
+    except json.JSONDecodeError:
+        # Fallback to manual brace counting for incomplete JSON support
+        brace_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == open_brace:
+                brace_count += 1
+            elif text[i] == ("}" if open_brace == "{" else "]"):
+                brace_count -= 1
 
-        if brace_count == 0:
-            end = i
-            break
+            if brace_count == 0:
+                end = i
+                break
 
-    if end == -1 and add_missing_right_brace:
-        # If no closing brace is found, but we are allowed to add one
-        log.debug("Adding missing right brace to the JSON string.")
-        text += "}" if open_brace == "{" else "]"
-        end = len(text) - 1
-    elif end == -1:
-        raise ValueError(
-            "Incomplete JSON object found and add_missing_right_brace is False."
-        )
-
-    extracted_json = text[start : end + 1]
+        if end == -1 and add_missing_right_brace:
+            # If no closing brace is found, but we are allowed to add one
+            log.debug("Adding missing right brace to the JSON string.")
+            text += "}" if open_brace == "{" else "]"
+            end = len(text) - 1
+        elif end == -1:
+            raise ValueError(
+                "Incomplete JSON object found and add_missing_right_brace is False."
+            )
+        extracted_json = text[start : end + 1]
 
     return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
 
@@ -1187,30 +1193,37 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
         raise ValueError("No list found in the text.")
 
     # Attempt to find the matching closing bracket
-    bracket_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            bracket_count += 1
-        elif text[i] == "]":
-            bracket_count -= 1
+    # 1. Try to use json.JSONDecoder.raw_decode for better performance and robustness
+    try:
+        candidate = text[start:]
+        _, end_pos = json.JSONDecoder().raw_decode(candidate)
+        return candidate[:end_pos]
+    except json.JSONDecodeError:
+        # Fallback to manual bracket counting for incomplete list support
+        bracket_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == "[":
+                bracket_count += 1
+            elif text[i] == "]":
+                bracket_count -= 1
 
-        if bracket_count == 0:
-            end = i
-            break
+            if bracket_count == 0:
+                end = i
+                break
 
-    if end == -1 and add_missing_right_bracket:
-        # If no closing bracket is found, but we are allowed to add one
-        text += "]"
-        end = len(text) - 1
-    elif end == -1:
-        log.error("Incomplete list found and add_missing_right_bracket is False.")
-        # return None
-        raise ValueError(
-            "Incomplete list found and add_missing_right_bracket is False."
-        )
+        if end == -1 and add_missing_right_bracket:
+            # If no closing bracket is found, but we are allowed to add one
+            text += "]"
+            end = len(text) - 1
+        elif end == -1:
+            log.error("Incomplete list found and add_missing_right_bracket is False.")
+            # return None
+            raise ValueError(
+                "Incomplete list found and add_missing_right_bracket is False."
+            )
 
-    return text[start : end + 1]
+        return text[start : end + 1]
 
 
 def extract_yaml_str(text: str) -> str:
