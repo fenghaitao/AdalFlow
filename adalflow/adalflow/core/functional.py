@@ -27,6 +27,7 @@ import yaml
 import ast
 import threading
 import base64
+import weakref
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -43,6 +44,16 @@ T_co = TypeVar("T_co", covariant=True)
 ########################################################################################
 # For Dataclass base class and all schema related functions
 ########################################################################################
+
+_FIELDS_CACHE = weakref.WeakKeyDictionary()
+
+
+def _get_cached_fields(obj_or_cls: Any) -> Tuple[Field, ...]:
+    """Get the fields of a dataclass, using a cache to avoid redundant calls."""
+    cls = obj_or_cls if isinstance(obj_or_cls, type) else type(obj_or_cls)
+    if cls not in _FIELDS_CACHE:
+        _FIELDS_CACHE[cls] = fields(cls)
+    return _FIELDS_CACHE[cls]
 
 
 def custom_asdict(
@@ -66,7 +77,7 @@ def custom_asdict(
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
-        for f in fields(obj):
+        for f in _get_cached_fields(obj):
             if f.name in exclude.get(obj.__class__.__name__, []):
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
@@ -509,7 +520,7 @@ def get_dataclass_schema(
         schema["type"] = get_type_schema(cls, exclude, type_var_map)
         return schema
 
-    for f in fields(cls):
+    for f in _get_cached_fields(cls):
         if f.name in current_exclude:
             continue
         # prepare field schema, it weill be done recursively for nested dataclasses
