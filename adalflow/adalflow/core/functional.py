@@ -27,6 +27,7 @@ import yaml
 import ast
 import threading
 import base64
+import weakref
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -35,6 +36,18 @@ from pydantic import BaseModel
 from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
+
+# Cache for dataclass fields to improve performance of asdict and schema generation
+_FIELDS_CACHE = weakref.WeakKeyDictionary()
+
+
+def _get_cached_fields(obj_or_cls) -> Tuple[Field, ...]:
+    """Retrieve the fields of a dataclass, using a cache for performance."""
+    cls = obj_or_cls if isinstance(obj_or_cls, type) else type(obj_or_cls)
+    if cls not in _FIELDS_CACHE:
+        _FIELDS_CACHE[cls] = fields(cls)
+    return _FIELDS_CACHE[cls]
+
 
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
@@ -66,7 +79,7 @@ def custom_asdict(
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
-        for f in fields(obj):
+        for f in _get_cached_fields(obj):
             if f.name in exclude.get(obj.__class__.__name__, []):
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
@@ -509,7 +522,7 @@ def get_dataclass_schema(
         schema["type"] = get_type_schema(cls, exclude, type_var_map)
         return schema
 
-    for f in fields(cls):
+    for f in _get_cached_fields(cls):
         if f.name in current_exclude:
             continue
         # prepare field schema, it weill be done recursively for nested dataclasses
@@ -1055,10 +1068,10 @@ def extract_function_expression(
 
 def _is_valid_json_str(text: str) -> bool:
     """Helper function to check if a string is valid JSON.
-    
+
     Args:
         text (str): The text to validate as JSON.
-        
+
     Returns:
         bool: True if the text is valid JSON, False otherwise.
     """
@@ -1089,24 +1102,22 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     """
     # NOTE: this regex parsing is taken from langchain.output_parsers.pydantic
     text = text.strip()
-    
+
     # First check if the text is already a valid JSON string
     if _is_valid_json_str(text):
         return text
-    
+
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
+    malformed_pattern = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
     malformed_match = malformed_pattern.match(text)
-    if malformed_match and text.endswith('```}'):
+    if malformed_match and text.endswith("```}"):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
         # Validate using helper function
         if _is_valid_json_str(potential_json):
             return potential_json
-    
+
     # Then check if the JSON is wrapped in markdown code blocks
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
@@ -1114,7 +1125,9 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     json_markdown_pattern = re.compile(
         r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
     )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = json_markdown_pattern.match(
+        text
+    )  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1123,7 +1136,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
             return json_content
         # If not valid, continue with the extraction logic on the markdown content
         text = json_content
-    
+
     start_obj = text.find("{")
     start_arr = text.find("[")
     if start_obj == -1 and start_arr == -1:
@@ -1133,33 +1146,45 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
         start_obj if start_obj != -1 else float("inf"),
         start_arr if start_arr != -1 else float("inf"),
     )
-    open_brace = text[start]
-    # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
 
-        if brace_count == 0:
-            end = i
-            break
+    # Use json.JSONDecoder for robust and fast parsing
+    decoder = json.JSONDecoder()
+    try:
+        _, index = decoder.raw_decode(text[start:])
+        return text[start : start + index].strip()
+    except json.JSONDecodeError:
+        if add_missing_right_brace:
+            try:
+                closing = "}" if text[start] == "{" else "]"
+                _, index = decoder.raw_decode(text[start:] + closing)
+                return (text[start:] + closing).strip()
+            except json.JSONDecodeError:
+                pass
 
-    if end == -1 and add_missing_right_brace:
-        # If no closing brace is found, but we are allowed to add one
-        log.debug("Adding missing right brace to the JSON string.")
-        text += "}" if open_brace == "{" else "]"
-        end = len(text) - 1
-    elif end == -1:
-        raise ValueError(
-            "Incomplete JSON object found and add_missing_right_brace is False."
-        )
+        # Fallback to manual counting if decoder fails (e.g., for very malformed JSON that we still want to try and extract)
+        open_brace = text[start]
+        brace_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == open_brace:
+                brace_count += 1
+            elif text[i] == ("}" if open_brace == "{" else "]"):
+                brace_count -= 1
 
-    extracted_json = text[start : end + 1]
+            if brace_count == 0:
+                end = i
+                break
 
-    return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
+        if end == -1 and add_missing_right_brace:
+            log.debug("Adding missing right brace to the JSON string.")
+            text += "}" if open_brace == "{" else "]"
+            end = len(text) - 1
+        elif end == -1:
+            raise ValueError(
+                "Incomplete JSON object found and add_missing_right_brace is False."
+            )
+
+        return text[start : end + 1].strip()
 
 
 def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
@@ -1183,34 +1208,44 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
     start = text.find("[")
     if start == -1:
         log.error("No list found in the text.")
-        # return None
         raise ValueError("No list found in the text.")
 
-    # Attempt to find the matching closing bracket
-    bracket_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            bracket_count += 1
-        elif text[i] == "]":
-            bracket_count -= 1
+    # Use json.JSONDecoder for robust and fast parsing
+    decoder = json.JSONDecoder()
+    try:
+        _, index = decoder.raw_decode(text[start:])
+        return text[start : start + index].strip()
+    except json.JSONDecodeError:
+        if add_missing_right_bracket:
+            try:
+                _, index = decoder.raw_decode(text[start:] + "]")
+                return (text[start:] + "]").strip()
+            except json.JSONDecodeError:
+                pass
 
-        if bracket_count == 0:
-            end = i
-            break
+        # Fallback to manual counting
+        bracket_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == "[":
+                bracket_count += 1
+            elif text[i] == "]":
+                bracket_count -= 1
 
-    if end == -1 and add_missing_right_bracket:
-        # If no closing bracket is found, but we are allowed to add one
-        text += "]"
-        end = len(text) - 1
-    elif end == -1:
-        log.error("Incomplete list found and add_missing_right_bracket is False.")
-        # return None
-        raise ValueError(
-            "Incomplete list found and add_missing_right_bracket is False."
-        )
+            if bracket_count == 0:
+                end = i
+                break
 
-    return text[start : end + 1]
+        if end == -1 and add_missing_right_bracket:
+            text += "]"
+            end = len(text) - 1
+        elif end == -1:
+            log.error("Incomplete list found and add_missing_right_bracket is False.")
+            raise ValueError(
+                "Incomplete list found and add_missing_right_bracket is False."
+            )
+
+        return text[start : end + 1].strip()
 
 
 def extract_yaml_str(text: str) -> str:
@@ -1328,13 +1363,13 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
 ########################################################################################
 def encode_image(image_path: str) -> str:
     """Encode an image file to base64 string.
-    
+
     Args:
         image_path (str): Path to the image file.
-        
+
     Returns:
         str: Base64 encoded string of the image.
-        
+
     Raises:
         FileNotFoundError: If the image file does not exist.
         PermissionError: If there's no permission to read the file.
@@ -1346,7 +1381,9 @@ def encode_image(image_path: str) -> str:
     except FileNotFoundError:
         raise FileNotFoundError(f"Image file not found: {image_path}")
     except PermissionError:
-        raise PermissionError(f"Permission denied when reading image file: {image_path}")
+        raise PermissionError(
+            f"Permission denied when reading image file: {image_path}"
+        )
     except Exception as e:
         raise Exception(f"Error encoding image {image_path}: {str(e)}")
 
