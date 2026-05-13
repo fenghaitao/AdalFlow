@@ -1133,6 +1133,18 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
         start_obj if start_obj != -1 else float("inf"),
         start_arr if start_arr != -1 else float("inf"),
     )
+
+    # 1. Attempt to use json.JSONDecoder().raw_decode to correctly handle braces in strings
+    # This is also significantly faster for large strings
+    decoder = json.JSONDecoder()
+    try:
+        _, end_idx = decoder.raw_decode(text, start)
+        return text[start:end_idx].strip()
+    except json.JSONDecodeError:
+        # Fallback to manual counting if it's potentially an incomplete JSON
+        # and we need to add a missing brace
+        pass
+
     open_brace = text[start]
     # Attempt to find the matching closing brace
     brace_count = 0
@@ -1185,6 +1197,17 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
         log.error("No list found in the text.")
         # return None
         raise ValueError("No list found in the text.")
+
+    # 1. Attempt to use json.JSONDecoder().raw_decode to correctly handle brackets in strings
+    # This is also significantly faster for large strings
+    decoder = json.JSONDecoder()
+    try:
+        _, end_idx = decoder.raw_decode(text, start)
+        return text[start:end_idx].strip()
+    except json.JSONDecodeError:
+        # Fallback to manual counting if it's potentially an incomplete list
+        # and we need to add a missing bracket
+        pass
 
     # Attempt to find the matching closing bracket
     bracket_count = 0
