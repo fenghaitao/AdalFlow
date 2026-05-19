@@ -27,6 +27,7 @@ import yaml
 import ast
 import threading
 import base64
+import weakref
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -43,6 +44,17 @@ T_co = TypeVar("T_co", covariant=True)
 ########################################################################################
 # For Dataclass base class and all schema related functions
 ########################################################################################
+
+# Cache for dataclass fields to avoid redundant calls to dataclasses.fields()
+_FIELDS_CACHE = weakref.WeakKeyDictionary()
+
+
+def _get_cached_fields(cls_or_obj: Any) -> Tuple[Field, ...]:
+    """Get the fields of a dataclass, using a cache to avoid redundant calls."""
+    cls = cls_or_obj if isinstance(cls_or_obj, type) else type(cls_or_obj)
+    if cls not in _FIELDS_CACHE:
+        _FIELDS_CACHE[cls] = fields(cls)
+    return _FIELDS_CACHE[cls]
 
 
 def custom_asdict(
@@ -66,7 +78,7 @@ def custom_asdict(
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
-        for f in fields(obj):
+        for f in _get_cached_fields(obj):
             if f.name in exclude.get(obj.__class__.__name__, []):
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
@@ -266,7 +278,7 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
                 f"Expected data of type dict for {cls}, but got {type(data).__name__}"
             )
         cls_type = extract_dataclass_type(cls)
-        fieldtypes = {f.name: f.type for f in cls_type.__dataclass_fields__.values()}
+        fieldtypes = {f.name: f.type for f in _get_cached_fields(cls_type)}
 
         restored_data = cls_type(
             **{
@@ -509,7 +521,7 @@ def get_dataclass_schema(
         schema["type"] = get_type_schema(cls, exclude, type_var_map)
         return schema
 
-    for f in fields(cls):
+    for f in _get_cached_fields(cls):
         if f.name in current_exclude:
             continue
         # prepare field schema, it weill be done recursively for nested dataclasses
