@@ -22,6 +22,19 @@ import logging
 import pickle
 import inspect
 
+# Cache for Parameter class to avoid repeated local imports
+_PARAMETER_CLS = None
+
+
+def _get_parameter_cls():
+    global _PARAMETER_CLS
+    if _PARAMETER_CLS is None:
+        from adalflow.optim.parameter import Parameter
+
+        _PARAMETER_CLS = Parameter
+    return _PARAMETER_CLS
+
+
 if TYPE_CHECKING:
     from adalflow.optim.parameter import Parameter
     from adalflow.optim.grad_component import GradComponent
@@ -844,44 +857,44 @@ class Component:
     #     return self
 
     def __setattr__(self, name: str, value: Any) -> None:
-        from adalflow.optim.parameter import Parameter
-
-        def remove_from(*dicts_or_sets):
-            for d in dicts_or_sets:
-                if name in d:
-                    if isinstance(d, dict):
-                        del d[name]
-                    else:
-                        d.discard(name)
+        # Optimized __setattr__ to reduce overhead
+        parameter_cls = _get_parameter_cls()
 
         # set parameter
-        params = self.__dict__.get("_parameters")
-        if isinstance(value, Parameter):
+        if isinstance(value, parameter_cls):
+            params = self.__dict__.get("_parameters")
             if params is None:
                 raise AttributeError(
                     "cant assign parameter before Component.__init__() call"
                 )
-            remove_from(self.__dict__)
+            if name in self.__dict__:
+                del self.__dict__[name]
             self.register_parameter(name, value)
-        elif params is not None and name in params:
+            return
+
+        params = self.__dict__.get("_parameters")
+        if params is not None and name in params:
             if value is not None:
                 raise TypeError(
                     f"cannot assign '{type(value)}' object to parameter '{name}' (Parameter or None required)"
                 )
             self.register_parameter(name, value)
-        else:  # set component
+            return
 
+        # set component
+        if isinstance(value, Component):
             components = self.__dict__.get("_components")
-            if isinstance(value, Component):
-                if components is None:
-                    raise AttributeError(
-                        "cant assign component before Component.__init__() call"
-                    )
-                remove_from(self.__dict__)
-                components[name] = value
+            if components is None:
+                raise AttributeError(
+                    "cant assign component before Component.__init__() call"
+                )
+            if name in self.__dict__:
+                del self.__dict__[name]
+            components[name] = value
+            return
 
-            else:  # set attribute
-                super().__setattr__(name, value)
+        # set attribute
+        super().__setattr__(name, value)
 
     def __getattr__(self, name: str) -> Any:
         if "_parameters" in self.__dict__:
