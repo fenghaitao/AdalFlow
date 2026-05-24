@@ -36,6 +36,15 @@ from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
 
+_JSON_DECODER = json.JSONDecoder()
+_MALFORMED_JSON_PATTERN = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
+_JSON_MARKDOWN_PATTERN = re.compile(
+    r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
+)
+_YAML_RE_PATTERN = re.compile(
+    r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
+)
+
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
 
@@ -1096,25 +1105,19 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
-    malformed_match = malformed_pattern.match(text)
-    if malformed_match and text.endswith('```}'):
+    malformed_match = _MALFORMED_JSON_PATTERN.match(text)
+    if malformed_match and text.endswith("```}"):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
         # Validate using helper function
         if _is_valid_json_str(potential_json):
             return potential_json
-    
+
     # Then check if the JSON is wrapped in markdown code blocks
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
     # extracting embedded code blocks within JSON string values
-    json_markdown_pattern = re.compile(
-        r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
-    )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = _JSON_MARKDOWN_PATTERN.match(text)  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1123,43 +1126,48 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
             return json_content
         # If not valid, continue with the extraction logic on the markdown content
         text = json_content
-    
+
     start_obj = text.find("{")
     start_arr = text.find("[")
     if start_obj == -1 and start_arr == -1:
         raise ValueError(f"No JSON object or array found in the text: {text}")
 
-    start = min(
-        start_obj if start_obj != -1 else float("inf"),
-        start_arr if start_arr != -1 else float("inf"),
-    )
-    open_brace = text[start]
-    # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
-
-        if brace_count == 0:
-            end = i
-            break
-
-    if end == -1 and add_missing_right_brace:
-        # If no closing brace is found, but we are allowed to add one
-        log.debug("Adding missing right brace to the JSON string.")
-        text += "}" if open_brace == "{" else "]"
-        end = len(text) - 1
-    elif end == -1:
-        raise ValueError(
-            "Incomplete JSON object found and add_missing_right_brace is False."
+    start = int(
+        min(
+            start_obj if start_obj != -1 else float("inf"),
+            start_arr if start_arr != -1 else float("inf"),
         )
+    )
 
-    extracted_json = text[start : end + 1]
+    # Attempt to find the end of the JSON object using the built-in decoder
+    try:
+        _, end_pos = _JSON_DECODER.raw_decode(text[start:])
+        return text[start : start + end_pos].strip()
+    except json.JSONDecodeError:
+        # Fallback for incomplete JSON
+        open_brace = text[start]
+        brace_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == open_brace:
+                brace_count += 1
+            elif text[i] == ("}" if open_brace == "{" else "]"):
+                brace_count -= 1
 
-    return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
+            if brace_count == 0:
+                end = i
+                break
+
+        if end == -1 and add_missing_right_brace:
+            # If no closing brace is found, but we are allowed to add one
+            log.debug("Adding missing right brace to the JSON string.")
+            return (text[start:] + ("}" if open_brace == "{" else "]")).strip()
+        elif end == -1:
+            raise ValueError(
+                "Incomplete JSON object found and add_missing_right_brace is False."
+            )
+
+        return text[start : end + 1].strip()
 
 
 def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
@@ -1186,31 +1194,34 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
         # return None
         raise ValueError("No list found in the text.")
 
-    # Attempt to find the matching closing bracket
-    bracket_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            bracket_count += 1
-        elif text[i] == "]":
-            bracket_count -= 1
+    # Attempt to find the end of the list using the built-in decoder
+    try:
+        _, end_pos = _JSON_DECODER.raw_decode(text[start:])
+        return text[start : start + end_pos].strip()
+    except json.JSONDecodeError:
+        # Fallback for incomplete list
+        bracket_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == "[":
+                bracket_count += 1
+            elif text[i] == "]":
+                bracket_count -= 1
 
-        if bracket_count == 0:
-            end = i
-            break
+            if bracket_count == 0:
+                end = i
+                break
 
-    if end == -1 and add_missing_right_bracket:
-        # If no closing bracket is found, but we are allowed to add one
-        text += "]"
-        end = len(text) - 1
-    elif end == -1:
-        log.error("Incomplete list found and add_missing_right_bracket is False.")
-        # return None
-        raise ValueError(
-            "Incomplete list found and add_missing_right_bracket is False."
-        )
+        if end == -1 and add_missing_right_bracket:
+            # If no closing bracket is found, but we are allowed to add one
+            return (text[start:] + "]").strip()
+        elif end == -1:
+            log.error("Incomplete list found and add_missing_right_bracket is False.")
+            raise ValueError(
+                "Incomplete list found and add_missing_right_bracket is False."
+            )
 
-    return text[start : end + 1]
+        return text[start : end + 1].strip()
 
 
 def extract_yaml_str(text: str) -> str:
@@ -1230,10 +1241,7 @@ def extract_yaml_str(text: str) -> str:
         ValueError: If no YAML string is found in the text.
     """
     try:
-        yaml_re_pattern: re.Pattern = re.compile(
-            r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
-        )
-        match = yaml_re_pattern.search(text.strip())
+        match = _YAML_RE_PATTERN.search(text.strip())
 
         yaml_str = ""
         if match:

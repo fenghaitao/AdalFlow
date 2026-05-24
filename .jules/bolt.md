@@ -1,0 +1,3 @@
+## 2026-05-24 - Core Path Optimizations (JSON & Attribute Setting)
+**Learning:** Core infrastructure methods like `Component.__setattr__` and `extract_json_str` are extremely hot paths. Local imports and manual Python loops in these areas can significantly degrade performance compared to module-level lazy caching and built-in C-optimized functions like `json.JSONDecoder().raw_decode()`. Manual brace-counting in Python is also error-prone when string literals contain braces.
+**Action:** Always prefer `raw_decode()` for JSON extraction to handle nested structures and string literals correctly/efficiently. Use module-level lazy caching for circular dependency classes instead of local imports in hot methods.

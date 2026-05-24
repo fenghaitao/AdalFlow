@@ -35,6 +35,17 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+_PARAMETER_CLS: Optional[Type] = None
+
+
+def _get_parameter_cls():
+    global _PARAMETER_CLS
+    if _PARAMETER_CLS is None:
+        from adalflow.optim.parameter import Parameter
+
+        _PARAMETER_CLS = Parameter
+    return _PARAMETER_CLS
+
 
 def _addindent(s_, numSpaces):
     s = s_.split("\n")
@@ -844,24 +855,17 @@ class Component:
     #     return self
 
     def __setattr__(self, name: str, value: Any) -> None:
-        from adalflow.optim.parameter import Parameter
-
-        def remove_from(*dicts_or_sets):
-            for d in dicts_or_sets:
-                if name in d:
-                    if isinstance(d, dict):
-                        del d[name]
-                    else:
-                        d.discard(name)
+        parameter_cls = _get_parameter_cls()
 
         # set parameter
         params = self.__dict__.get("_parameters")
-        if isinstance(value, Parameter):
+        if isinstance(value, parameter_cls):
             if params is None:
                 raise AttributeError(
                     "cant assign parameter before Component.__init__() call"
                 )
-            remove_from(self.__dict__)
+            # Optimized inline remove_from
+            self.__dict__.pop(name, None)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -870,14 +874,14 @@ class Component:
                 )
             self.register_parameter(name, value)
         else:  # set component
-
             components = self.__dict__.get("_components")
             if isinstance(value, Component):
                 if components is None:
                     raise AttributeError(
                         "cant assign component before Component.__init__() call"
                     )
-                remove_from(self.__dict__)
+                # Optimized inline remove_from
+                self.__dict__.pop(name, None)
                 components[name] = value
 
             else:  # set attribute
