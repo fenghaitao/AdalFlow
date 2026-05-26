@@ -183,6 +183,8 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
         self.set_parameters(prompt_kwargs)
 
+        self._prompt_builder = None
+
         # end of trainable parameters
         self.backward_engine: "BackwardEngine" = None
         log.info(f"Generator {self.name} initialized.")
@@ -324,6 +326,23 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
         assert "model_client" in config, "model_client is required in the config"
         return super().from_config(config)
 
+    @property
+    def _prompt_builder_cache(self) -> Prompt:
+        if self._prompt_builder is None:
+            prompt_builder = Prompt(
+                template=self.template, prompt_kwargs=self.prompt_kwargs
+            )
+            # using object.__setattr__ to avoid triggering the Component's __setattr__
+            # which would add it to the self._components registry
+            object.__setattr__(self, "_prompt_builder", prompt_builder)
+        return self._prompt_builder
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in ["template", "prompt_kwargs"]:
+            # invalidate the prompt builder cache
+            object.__setattr__(self, "_prompt_builder", None)
+        super().__setattr__(name, value)
+
     def _compose_model_kwargs(self, **model_kwargs) -> Dict:
         r"""
         The model configuration exclude the input itself.
@@ -342,17 +361,10 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.print_prompt(**kwargs)
+        return self._prompt_builder_cache.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.call(**kwargs)
-
-    def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
-        return s
+        return self._prompt_builder_cache.call(**kwargs)
 
     def _post_call(self, completion: Any) -> GeneratorOutput:
         r"""Get string completion and process it with the output_processors."""
@@ -460,13 +472,17 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
         return output
 
-    def _pre_call(self, prompt_kwargs: Dict, model_kwargs: Dict) -> Dict[str, Any]:
+    def _pre_call(
+        self,
+        prompt_kwargs: Dict,
+        model_kwargs: Dict,
+        prompt_str: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
         r"""Prepare the input, prompt_kwargs, model_kwargs for the model call."""
         # 1. render the prompt from the template
-        prompt_str = self.get_prompt(**prompt_kwargs)
-        # prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-
-        # prompt_str = prompt.call(**prompt_kwargs).strip()
+        if prompt_str is None:
+            prompt_str = self.get_prompt(**prompt_kwargs)
 
         # 2. combine the model_kwargs with the default model_kwargs
         composed_model_kwargs = self._compose_model_kwargs(**model_kwargs)
@@ -1244,7 +1260,9 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             log.debug(f"prompt_kwargs: {prompt_kwargs}")
             log.debug(f"model_kwargs: {model_kwargs}")
 
-            api_kwargs = self._pre_call(prompt_kwargs, model_kwargs)
+            api_kwargs = self._pre_call(
+                prompt_kwargs, model_kwargs, prompt_str=prompt_str
+            )
 
             log.debug(f"api_kwargs: {api_kwargs}")
             output: GeneratorOutputType = None
@@ -1334,7 +1352,9 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             log.info(f"prompt_kwargs: {prompt_kwargs}")
             log.info(f"model_kwargs: {model_kwargs}")
 
-            api_kwargs = self._pre_call(prompt_kwargs, model_kwargs)
+            api_kwargs = self._pre_call(
+                prompt_kwargs, model_kwargs, prompt_str=prompt_str
+            )
             output: GeneratorOutputType = None
             # call the model client
             completion = None
@@ -1405,16 +1425,7 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     def _extra_repr(self) -> str:
         # Create the string for model_kwargs
-        s = f"model_kwargs={self.model_kwargs}, "
-
-        # Create the string for trainable prompt_kwargs
-        prompt_kwargs_repr = [
-            k
-            for k, v in self.prompt_kwargs.items()
-            if isinstance(v, Parameter) and v.requires_opt
-        ]
-
-        s += f"trainable_prompt_kwargs={prompt_kwargs_repr}"
+        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={self._prompt_builder_cache}"
         return s
 
     def to_dict(self) -> Dict[str, Any]:
