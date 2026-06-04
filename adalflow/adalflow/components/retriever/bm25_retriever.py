@@ -25,6 +25,15 @@ PARAM_K1 = 1.5
 PARAM_B = 0.75
 PARAM_EPSILON = 0.25
 
+_SHARED_TOKENIZER: Optional[Tokenizer] = None
+
+
+def get_shared_tokenizer() -> Tokenizer:
+    global _SHARED_TOKENIZER
+    if _SHARED_TOKENIZER is None:
+        _SHARED_TOKENIZER = Tokenizer()
+    return _SHARED_TOKENIZER
+
 
 # TODO: move the functions in core.functional
 def split_text_by_word_fn(x: str) -> List[str]:
@@ -33,7 +42,7 @@ def split_text_by_word_fn(x: str) -> List[str]:
 
 
 def split_text_by_word_fn_then_lower_tokenized(x: str) -> List[str]:
-    tokenizer = Tokenizer()
+    tokenizer = get_shared_tokenizer()
     words = x.lower().split(" ")
     tokens = [tokenizer.encode(word) for word in words]
     final_tokens: List[str] = []
@@ -44,7 +53,7 @@ def split_text_by_word_fn_then_lower_tokenized(x: str) -> List[str]:
 
 
 def split_text_tokenized(x: str) -> List[str]:
-    tokenizer = Tokenizer()
+    tokenizer = get_shared_tokenizer()
     # words = x.lower().split(" ")
     tokens = tokenizer.encode(x)
     # print(tokens)
@@ -165,6 +174,7 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             else split_text_by_word_fn
         )
         self.indexed = False  # this is important to check if the retrieve is possible
+        self.use_tokenizer = use_tokenizer
         self.index_keys = [
             "nd",
             "t2d",
@@ -196,6 +206,8 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             False  # this is important to check if the retrieve is possible
         )
         self.total_documents: int = 0
+        self._inverted_index: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+        self._precomputed_denominator: np.ndarray = np.array([])
 
     def _apply_split_function(self, documents: List[str]):
         if self._split_function is None:
@@ -229,6 +241,29 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
                 self.nd[word] += 1
 
         self.avgdl = sum(self.doc_len) / len(corpus)
+        self._build_inverted_index()
+        self._precompute_denominator()
+
+    def _build_inverted_index(self):
+        r"""Build an inverted index for faster scoring."""
+        self._inverted_index = {}
+        temp_index = {}
+        for doc_idx, term_freq in enumerate(self.t2d):
+            for token, freq in term_freq.items():
+                if token not in temp_index:
+                    temp_index[token] = ([], [])
+                temp_index[token][0].append(doc_idx)
+                temp_index[token][1].append(freq)
+
+        for token, (indices, freqs) in temp_index.items():
+            self._inverted_index[token] = (np.array(indices), np.array(freqs))
+
+    def _precompute_denominator(self):
+        r"""Precompute the denominator constant for scoring."""
+        doc_len = np.array(self.doc_len)
+        self._precomputed_denominator = self.k1 * (
+            1 - self.b + self.b * doc_len / self.avgdl
+        )
 
     def _calc_idf(self):
         idf_sum = 0
@@ -257,13 +292,15 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             query: List[str]: The tokenized query
         """
         score = np.zeros(self.total_documents)
-        doc_len = np.array(self.doc_len)
         for q in query:
-            q_freq = np.array([(doc.get(q) or 0) for doc in self.t2d])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
+            if q not in self._inverted_index:
+                continue
+            indices, freqs = self._inverted_index[q]
+            idf = self.idf.get(q) or 0
+            score[indices] += idf * (
+                freqs
                 * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
+                / (freqs + self._precomputed_denominator[indices])
             )
         return score.tolist()
 
@@ -276,13 +313,26 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         """
         assert all(di < len(self.t2d) for di in doc_ids)
         score = np.zeros(len(doc_ids))
-        doc_len = np.array(self.doc_len)[doc_ids]
+        doc_ids_arr = np.array(doc_ids)
+        idx_map = {doc_id: i for i, doc_id in enumerate(doc_ids)}
+
         for q in query:
-            q_freq = np.array([(self.t2d[di].get(q) or 0) for di in doc_ids])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
+            if q not in self._inverted_index:
+                continue
+            indices, freqs = self._inverted_index[q]
+            mask = np.isin(indices, doc_ids_arr)
+            if not np.any(mask):
+                continue
+
+            target_indices = indices[mask]
+            target_freqs = freqs[mask]
+            target_positions = [idx_map[idx] for idx in target_indices]
+
+            idf = self.idf.get(q) or 0
+            score[target_positions] += idf * (
+                target_freqs
                 * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
+                / (target_freqs + self._precomputed_denominator[target_indices])
             )
         return score.tolist()
 
@@ -361,14 +411,21 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
     def load_from_file(cls, path: str):
         # create an instance of the class
         try:
-            index_dict = load_json(path)
-            instance = cls.from_dict(index_dict)
+            loaded_data = load_json(path)
+            if isinstance(loaded_data, cls):
+                instance = loaded_data
+            else:
+                instance = cls.from_dict(loaded_data)
             # add the split function
             instance._split_function = (
                 split_text_by_word_fn_then_lower_tokenized
-                if instance._use_tokenizer
+                if instance.use_tokenizer
                 else split_text_by_word_fn
             )
+            # Rebuild performance-related data that was not serialized
+            if instance.indexed:
+                instance._build_inverted_index()
+                instance._precompute_denominator()
             return instance
         except Exception as e:
             log.error(f"Error loading the index from file: {e}")
