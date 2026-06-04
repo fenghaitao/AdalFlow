@@ -300,6 +300,13 @@ class Component:
 
         # obj = cls(**data.get("_init_args", {}))
         obj = cls.__new__(cls)  # Create a new instance without calling __init__
+        # Initialize internal component structures usually set in __init__
+        super(Component, obj).__setattr__("_components", OrderedDict())
+        super(Component, obj).__setattr__("_parameters", OrderedDict())
+        super(Component, obj).__setattr__("training", False)
+        super(Component, obj).__setattr__("teacher_mode", False)
+        super(Component, obj).__setattr__("tracing", False)
+
         for key, value in data["data"].items():
             setattr(obj, key, cls._restore_value(value))
         return obj
