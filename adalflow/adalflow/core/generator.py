@@ -181,6 +181,7 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
                 f"output_processors should be a DataComponent instance, got {type(output_processors)}"
             )
 
+        object.__setattr__(self, "_prompt_builder", None)
         self.set_parameters(prompt_kwargs)
 
         # end of trainable parameters
@@ -224,6 +225,24 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
                  Returns 0 if no prompt has been processed yet.
         """
         return self._estimated_token_count
+
+    @property
+    def _prompt_builder_cache(self) -> Prompt:
+        if self._prompt_builder is None:
+            object.__setattr__(
+                self,
+                "_prompt_builder",
+                Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs),
+            )
+            # Ensure the prompt_builder's prompt_kwargs is the same object as self.prompt_kwargs
+            # for consistency in manual updates, though we now also handle this via __setattr__
+            self._prompt_builder.prompt_kwargs = self.prompt_kwargs
+        return self._prompt_builder
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in ["template", "prompt_kwargs"]:
+            object.__setattr__(self, "_prompt_builder", None)
+        super().__setattr__(name, value)
 
     def update_default_backward_pass_setup(self, setup: BackwardPassSetup):
         self.backward_pass_setup = setup
@@ -342,16 +361,13 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.print_prompt(**kwargs)
+        return self._prompt_builder_cache.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.call(**kwargs)
+        return self._prompt_builder_cache.call(**kwargs)
 
     def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
+        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={self._prompt_builder_cache}"
         return s
 
     def _post_call(self, completion: Any) -> GeneratorOutput:
