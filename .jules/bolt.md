@@ -1,0 +1,3 @@
+## 2025-05-22 - [O(N^2) Prompt Context Preparation]
+**Learning:** `Prompt._convert_prompt_kwargs_to_str` had an O(N^2) complexity bottleneck because it filtered the entire context dictionary (containing all `prompt_kwargs`) for every single key in that dictionary during recursive `_deep_render` passes. For 2000 keys, this resulted in ~1343ms of overhead.
+**Action:** Pre-filter the context dictionary once to remove unrenderable objects (like other `Prompt` or `Template` instances) and pass this pre-filtered dictionary to `_deep_render`. This reduces complexity to O(N) and execution time to ~4ms for 2000 keys.
