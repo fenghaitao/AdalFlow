@@ -54,6 +54,17 @@ def test_extract_json_arr_str():
     )
 
 
+def test_extract_json_with_braces_in_strings():
+    text = '{"key": "}"}'
+    assert extract_json_str(text) == '{"key": "}"}'
+
+    text2 = '{"key": "{"}'
+    assert extract_json_str(text2) == '{"key": "{"}'
+
+    text3 = 'Some prefix {"key": "}"} some suffix'
+    assert extract_json_str(text3) == '{"key": "}"}'
+
+
 ##################################################
 # Test cases for fix_json_formatting function
 ##################################################
