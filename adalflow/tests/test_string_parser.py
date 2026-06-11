@@ -54,6 +54,14 @@ def test_extract_json_arr_str():
     )
 
 
+def test_extract_json_str_with_braces_in_string():
+    text = 'Some text before {"k": "}"} some text after'
+    assert extract_json_str(text) == '{"k": "}"}'
+
+    text2 = 'Array with brace ["{"]'
+    assert extract_json_str(text2) == '["{"]'
+
+
 ##################################################
 # Test cases for fix_json_formatting function
 ##################################################
