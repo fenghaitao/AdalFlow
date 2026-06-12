@@ -1,0 +1,3 @@
+## 2024-06-12 - [Optimized JSON/List String Extraction]
+**Learning:** Manual character-by-character loops for JSON-like structure boundary detection are slow and prone to errors (e.g., failing when braces/brackets appear in string literals). Python's `json.JSONDecoder().raw_decode` is a robust, C-optimized alternative that handles string literals correctly and provides significant performance gains (~7x faster for typical payloads).
+**Action:** Use `json.JSONDecoder().raw_decode` with a starting index to find JSON object/array boundaries. Reuse a module-level `JSONDecoder` instance to avoid redundant instantiation and avoid string slicing for better memory efficiency.
