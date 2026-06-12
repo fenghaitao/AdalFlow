@@ -10,6 +10,7 @@ from adalflow.core.string_parser import (
 
 from adalflow.core.functional import (
     extract_json_str,
+    extract_list_str,
     fix_json_missing_commas,
     fix_json_escaped_single_quotes,
     extract_yaml_str,
@@ -52,6 +53,16 @@ def test_extract_json_arr_str():
         extract_json_str(text)
         == '[\n    {\n        "action": "add(2, b=3)"\n    },\n    {\n        "action": "search(query=\'something\')"\n    }\n]'
     )
+
+
+def test_extract_json_str_with_braces_in_string():
+    text = '{"key": "value with } brace", "other": 123}'
+    assert extract_json_str(text) == '{"key": "value with } brace", "other": 123}'
+
+
+def test_extract_list_str_with_brackets_in_string():
+    text = '["item with ] bracket", "item2"]'
+    assert extract_list_str(text) == '["item with ] bracket", "item2"]'
 
 
 ##################################################
