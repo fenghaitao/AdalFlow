@@ -1053,12 +1053,15 @@ def extract_function_expression(
     return text[: end + 1]
 
 
+_JSON_DECODER = json.JSONDecoder()
+
+
 def _is_valid_json_str(text: str) -> bool:
     """Helper function to check if a string is valid JSON.
-    
+
     Args:
         text (str): The text to validate as JSON.
-        
+
     Returns:
         bool: True if the text is valid JSON, False otherwise.
     """
@@ -1067,6 +1070,28 @@ def _is_valid_json_str(text: str) -> bool:
         return True
     except json.JSONDecodeError:
         return False
+
+
+def _extract_json_like_block(text: str, start_index: int, open_brace: str) -> int:
+    """Find the end index of a JSON object or array starting at start_index.
+
+    Uses json.JSONDecoder.raw_decode for robustness and speed.
+    """
+    try:
+        _, end_index = _JSON_DECODER.raw_decode(text, start_index)
+        return end_index - 1
+    except json.JSONDecodeError:
+        # Fallback to manual brace counting for potentially incomplete JSON
+        brace_count = 0
+        close_brace = "}" if open_brace == "{" else "]"
+        for i in range(start_index, len(text)):
+            if text[i] == open_brace:
+                brace_count += 1
+            elif text[i] == close_brace:
+                brace_count -= 1
+            if brace_count == 0:
+                return i
+    return -1
 
 
 def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
@@ -1135,17 +1160,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     )
     open_brace = text[start]
     # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
-
-        if brace_count == 0:
-            end = i
-            break
+    end = _extract_json_like_block(text, start, open_brace)
 
     if end == -1 and add_missing_right_brace:
         # If no closing brace is found, but we are allowed to add one
@@ -1187,17 +1202,7 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
         raise ValueError("No list found in the text.")
 
     # Attempt to find the matching closing bracket
-    bracket_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            bracket_count += 1
-        elif text[i] == "]":
-            bracket_count -= 1
-
-        if bracket_count == 0:
-            end = i
-            break
+    end = _extract_json_like_block(text, start, "[")
 
     if end == -1 and add_missing_right_bracket:
         # If no closing bracket is found, but we are allowed to add one
