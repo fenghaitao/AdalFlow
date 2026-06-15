@@ -25,6 +25,7 @@ import re
 import json
 import yaml
 import ast
+import functools
 import threading
 import base64
 
@@ -60,17 +61,29 @@ def custom_asdict(
     """
     if not is_dataclass_instance(obj):
         raise TypeError("custom_asdict() should be called on dataclass instances")
-    return _asdict_inner(obj, dict_factory, exclude or {})
+
+    # Pre-process exclude into sets for O(1) lookups
+    processed_exclude = {}
+    if exclude:
+        for class_name, field_names in exclude.items():
+            processed_exclude[class_name] = set(field_names)
+
+    return _asdict_inner(obj, dict_factory, processed_exclude)
 
 
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
-        for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+        # Use cached fields retrieval
+        obj_fields = _get_dataclass_fields(obj.__class__)
+        # Hoist class-level exclude lookup
+        current_exclude = exclude.get(obj.__class__.__name__, set())
+        for f in obj_fields:
+            name = f.name
+            if name in current_exclude:
                 continue
-            value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
-            result.append((f.name, value))
+            value = _asdict_inner(getattr(obj, name), dict_factory, exclude)
+            result.append((name, value))
         return dict_factory(result)
     elif isinstance(obj, tuple) and hasattr(obj, "_fields"):
         return type(obj)(*[_asdict_inner(v, dict_factory, exclude) for v in obj])
@@ -163,6 +176,7 @@ def validate_data(data: Dict[str, Any], fieldtypes: Dict[str, Any]) -> bool:
     return required_fields <= data.keys()
 
 
+@functools.lru_cache(maxsize=None)
 def is_potential_dataclass(t):
     """Check if the type is directly a dataclass or potentially a wrapped dataclass like Optional."""
     origin = get_origin(t)
@@ -172,6 +186,7 @@ def is_potential_dataclass(t):
     return is_dataclass(t)
 
 
+@functools.lru_cache(maxsize=None)
 def extract_dataclass_type(type_hint):
     """Extract the actual dataclass type from a type hint that could be Optional or other generic."""
     origin = get_origin(type_hint)
@@ -182,6 +197,12 @@ def extract_dataclass_type(type_hint):
             if arg is not type(None) and is_dataclass(arg):
                 return arg
     return type_hint if is_dataclass(type_hint) else None
+
+
+@functools.lru_cache(maxsize=None)
+def _get_dataclass_fields(cls):
+    """Get the fields of a dataclass, cached for performance."""
+    return fields(cls)
 
 
 def check_data_class_field_args_zero(cls):
@@ -266,7 +287,9 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
                 f"Expected data of type dict for {cls}, but got {type(data).__name__}"
             )
         cls_type = extract_dataclass_type(cls)
-        fieldtypes = {f.name: f.type for f in cls_type.__dataclass_fields__.values()}
+        # Use cached fields and pre-compute field types map
+        cls_fields = _get_dataclass_fields(cls_type)
+        fieldtypes = {f.name: f.type for f in cls_fields}
 
         restored_data = cls_type(
             **{
@@ -277,50 +300,42 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
         return restored_data
     elif isinstance(data, (list, tuple)):
         log.debug(f"List or Tuple: {cls}, {data}")
-        restored_data = []
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                restored_data.append(item)
-        return restored_data
+        if check_data_class_field_args_zero(cls):
+            target_cls = cls.__args__[0]
+            return [dataclass_obj_from_dict(target_cls, item) for item in data]
+        elif check_if_class_field_args_zero_exists(cls):
+            target_cls = cls.__args__[0]
+            return [dataclass_obj_from_dict(target_cls, item) for item in data]
+        else:
+            return list(data)
 
     elif isinstance(data, set):
         log.debug(f"Set: {cls}, {data}")
-        restored_data = set()
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                # Use the original data [Any]
-                restored_data.add(item)
-        return restored_data
+        if check_data_class_field_args_zero(cls):
+            target_cls = cls.__args__[0]
+            return {dataclass_obj_from_dict(target_cls, item) for item in data}
+        elif check_if_class_field_args_zero_exists(cls):
+            target_cls = cls.__args__[0]
+            return {dataclass_obj_from_dict(target_cls, item) for item in data}
+        else:
+            return set(data)
 
     elif isinstance(data, dict):
         log.debug(f"Dict: {cls}, {data}")
-        for key, value in data.items():
-            if check_data_class_field_args_one(cls):
-                # restore the value to its dataclass type
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            elif check_if_class_field_args_one_exists(cls):
-                # Use the original data [Any]
-
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            else:
-                # Use the original data [Any]
-                data[key] = value
-        return data
+        if check_data_class_field_args_one(cls):
+            target_cls = cls.__args__[1]
+            return {
+                key: dataclass_obj_from_dict(target_cls, value)
+                for key, value in data.items()
+            }
+        elif check_if_class_field_args_one_exists(cls):
+            target_cls = cls.__args__[1]
+            return {
+                key: dataclass_obj_from_dict(target_cls, value)
+                for key, value in data.items()
+            }
+        else:
+            return dict(data)
     # else normal data like int, str, float, etc.
     else:
         log.debug(f"Not datclass, or list, or dict: {cls}, use the original data.")
