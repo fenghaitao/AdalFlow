@@ -1,0 +1,3 @@
+## 2025-05-22 - [Optimizing JSON Extraction with raw_decode]
+**Learning:** Manual character-by-character loops in Python for scanning large strings (like finding matching braces) are significantly slower than built-in C-implemented methods. Using `json.JSONDecoder().raw_decode` provides O(N) robust parsing that correctly handles string literals and escapes, outperforming naive Python loops by ~5x in this codebase.
+**Action:** Prefer `json.JSONDecoder().raw_decode` or similar C-backed library functions for parsing tasks over manual Python loops. Always hoist regex patterns and decoders to module-level constants to avoid redundant instantiation/compilation overhead.
