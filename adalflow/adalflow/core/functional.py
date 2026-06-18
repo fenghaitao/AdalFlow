@@ -36,6 +36,8 @@ from pydantic.dataclasses import is_pydantic_dataclass
 
 log = logging.getLogger(__name__)
 
+_JSON_DECODER = json.JSONDecoder()
+
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
 
@@ -1055,10 +1057,10 @@ def extract_function_expression(
 
 def _is_valid_json_str(text: str) -> bool:
     """Helper function to check if a string is valid JSON.
-    
+
     Args:
         text (str): The text to validate as JSON.
-        
+
     Returns:
         bool: True if the text is valid JSON, False otherwise.
     """
@@ -1067,6 +1069,44 @@ def _is_valid_json_str(text: str) -> bool:
         return True
     except json.JSONDecodeError:
         return False
+
+
+def _extract_json_like_block(
+    text: str, start: int, add_missing_delimiter: bool, open_delimiter: str
+) -> str:
+    """Helper function to extract a JSON-like block (object or array).
+
+    It uses `json.JSONDecoder.raw_decode` to find the correct end of the block.
+    If `raw_decode` fails and `add_missing_delimiter` is True, it falls back to
+    manual brace/bracket counting to handle potentially incomplete strings.
+    """
+    try:
+        # Use raw_decode to find the end of the JSON object/array accurately
+        _, end = _JSON_DECODER.raw_decode(text, start)
+        return text[start:end]
+    except json.JSONDecodeError:
+        # Fallback to manual counting if raw_decode fails and we are allowed to add missing delimiter
+        if not add_missing_delimiter:
+            raise
+
+        close_delimiter = "}" if open_delimiter == "{" else "]"
+        brace_count = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == open_delimiter:
+                brace_count += 1
+            elif text[i] == close_delimiter:
+                brace_count -= 1
+
+            if brace_count == 0:
+                end = i
+                break
+
+        if end == -1:
+            # If no closing delimiter is found, we add one to the end
+            return text[start:] + close_delimiter
+
+        return text[start : end + 1]
 
 
 def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
@@ -1133,31 +1173,16 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
         start_obj if start_obj != -1 else float("inf"),
         start_arr if start_arr != -1 else float("inf"),
     )
-    open_brace = text[start]
-    # Attempt to find the matching closing brace
-    brace_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == open_brace:
-            brace_count += 1
-        elif text[i] == ("}" if open_brace == "{" else "]"):
-            brace_count -= 1
+    open_delimiter = text[start]
 
-        if brace_count == 0:
-            end = i
-            break
-
-    if end == -1 and add_missing_right_brace:
-        # If no closing brace is found, but we are allowed to add one
-        log.debug("Adding missing right brace to the JSON string.")
-        text += "}" if open_brace == "{" else "]"
-        end = len(text) - 1
-    elif end == -1:
+    try:
+        extracted_json = _extract_json_like_block(
+            text, start, add_missing_right_brace, open_delimiter
+        )
+    except json.JSONDecodeError:
         raise ValueError(
             "Incomplete JSON object found and add_missing_right_brace is False."
         )
-
-    extracted_json = text[start : end + 1]
 
     return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
 
@@ -1186,31 +1211,17 @@ def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
         # return None
         raise ValueError("No list found in the text.")
 
-    # Attempt to find the matching closing bracket
-    bracket_count = 0
-    end = -1
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            bracket_count += 1
-        elif text[i] == "]":
-            bracket_count -= 1
-
-        if bracket_count == 0:
-            end = i
-            break
-
-    if end == -1 and add_missing_right_bracket:
-        # If no closing bracket is found, but we are allowed to add one
-        text += "]"
-        end = len(text) - 1
-    elif end == -1:
+    try:
+        extracted_list = _extract_json_like_block(
+            text, start, add_missing_right_bracket, "["
+        )
+    except json.JSONDecodeError:
         log.error("Incomplete list found and add_missing_right_bracket is False.")
-        # return None
         raise ValueError(
             "Incomplete list found and add_missing_right_bracket is False."
         )
 
-    return text[start : end + 1]
+    return extracted_list
 
 
 def extract_yaml_str(text: str) -> str:
