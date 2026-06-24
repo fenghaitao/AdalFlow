@@ -1,0 +1,3 @@
+## 2026-06-24 - [Optimizing Prompt Keyword Argument Preparation]
+**Learning:** In `Prompt._convert_prompt_kwargs_to_str`, the original implementation was calling `_deep_render` for every keyword argument. Inside `_deep_render`, it was filtering the entire context dictionary to remove `Prompt` and `Template` objects to avoid circular references. This resulted in O(N²) complexity for prompt preparation, where N is the number of keyword arguments.
+**Action:** Pre-filter the context dictionary once in `_convert_prompt_kwargs_to_str` and pass the filtered dictionary to `_deep_render`. This reduces the complexity to O(N), which is significantly faster for prompts with a large number of variables.
