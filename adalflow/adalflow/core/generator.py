@@ -192,6 +192,8 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
         self._use_cache = use_cache
 
+        self.prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
+
         self._kwargs = {
             "model_client": model_client,
             "model_kwargs": model_kwargs,
@@ -342,16 +344,13 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.print_prompt(**kwargs)
+        return self.prompt.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.call(**kwargs)
+        return self.prompt.call(**kwargs)
 
     def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
+        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={self.prompt}"
         return s
 
     def _post_call(self, completion: Any) -> GeneratorOutput:
