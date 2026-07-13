@@ -125,13 +125,29 @@ def _deserialize_object_hook(d: Dict[str, Any]) -> Any:
     return d
 
 
-def to_dict(obj: Any) -> Dict[str, Any]:
+def to_dict(obj: Any) -> Any:
     """Convert the object to a dictionary.
+
+    This is an optimized version that avoids the json.loads(serialize(obj)) round-trip.
+    It ensures all keys are strings and tuples/sets are converted to lists,
+    matching the behavior of JSON serialization.
 
     Args:
         obj (Any): The object to be converted.
 
     Returns:
-        Dict[str, Any]: The dictionary representation of the object.
+        Any: The dictionary representation of the object.
     """
-    return json.loads(serialize(obj))
+    if isinstance(obj, dict):
+        return {str(k): to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple, set)):
+        return [to_dict(v) for v in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # Use the existing default() hook for specialized types
+        try:
+            return to_dict(default(obj))
+        except Exception:
+            # Fallback for objects that might fail in default() or recursive to_dict
+            return str(obj)
