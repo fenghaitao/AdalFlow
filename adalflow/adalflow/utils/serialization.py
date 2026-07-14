@@ -58,8 +58,9 @@ def default(o: Any) -> Union[Dict[str, Any], str]:
             except Exception as e:
                 log.error(f"Error serializing object {o}: {e}")
                 pass
+
         # handle set
-        elif isinstance(o, set):
+        if isinstance(o, set):
             return {"type": type(o).__name__, "data": list(o)}
         else:
             return {"type": type(o).__name__, "data": str(o)}
@@ -125,13 +126,39 @@ def _deserialize_object_hook(d: Dict[str, Any]) -> Any:
     return d
 
 
-def to_dict(obj: Any) -> Dict[str, Any]:
-    """Convert the object to a dictionary.
+def to_dict(obj: Any) -> Any:
+    """Convert the object to a dictionary by direct recursive conversion.
+
+    This is a performance optimization over `json.loads(serialize(obj))`.
 
     Args:
         obj (Any): The object to be converted.
 
     Returns:
-        Dict[str, Any]: The dictionary representation of the object.
+        Any: The dictionary representation of the object.
     """
-    return json.loads(serialize(obj))
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_dict(v) for v in obj]
+    if isinstance(obj, set):
+        return {"type": "set", "data": [to_dict(v) for v in obj]}
+    if isinstance(obj, enum.Enum):
+        return {"type": type(obj).__name__, "data": str(obj)}
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        return to_dict(obj.to_dict())
+    if hasattr(obj, "to_dict_class") and callable(obj.to_dict_class):
+        return to_dict(obj.to_dict_class())
+
+    # Fallback to default() for other types (handles dataclasses and others)
+    try:
+        res = default(obj)
+        # If default returns a primitive or a dict/list that we can handle,
+        # we still need to recursively process it to handle nested custom types.
+        if isinstance(res, dict) and "type" in res:
+            return res
+        return to_dict(res)
+    except Exception:
+        return str(obj)
