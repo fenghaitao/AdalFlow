@@ -266,25 +266,26 @@ class Component:
             # return {k: self._process_value(v) for k, v in sorted(value.items())}
             # no sorting
             return {k: self._process_value(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            # Recursively process list items
-            try:
-                # return sorted(self._process_value(v) for v in value)
-                return [self._process_value(v) for v in value]
-            except TypeError:
-                # If elements are not comparable, process them without sorting
-                return [self._process_value(v) for v in value]
-        elif hasattr(value, "to_dict"):
-            # Check if the object has a to_dict method
-            return self._attempt_to_dict(value)
+        elif isinstance(value, (list, tuple)):
+            # Recursively process list/tuple items
+            return [self._process_value(v) for v in value]
+        elif isinstance(value, set):
+            # Recursively process set items
+            return {"type": "set", "data": [self._process_value(v) for v in value]}
         else:
+            # We check if it has to_dict to handle Component and other custom objects.
+            # default(obj) also handles dataclasses.
+            if hasattr(value, "to_dict") or hasattr(value, "__dataclass_fields__"):
+                return self._attempt_to_dict(value)
             return value
 
     def _attempt_to_dict(self, obj):
         """Attempt to call to_dict on an object, handling both instances and class types."""
         try:
             # call our customized json serializer
-            return default(obj)
+            res = default(obj)
+            # Recursively process the result of default(obj) to ensure all nested types are handled
+            return self._process_value(res)
         except Exception as e:
             log.error(f"Error calling to_dict for object {obj}: {e}")
             # Fallback to a simpler representation
