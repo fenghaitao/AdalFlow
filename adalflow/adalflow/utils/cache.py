@@ -26,10 +26,7 @@ class CachedEngine:
 
     def _check_cache(self, prompt: str):
         hash_key = hash_text(prompt)
-        if hash_key in self.cache:
-            return self.cache[hash_key]
-        else:
-            return None
+        return self.cache.get(hash_key)
 
     def _save_cache(self, prompt: str, response: str):
         hash_key = hash_text(prompt)
