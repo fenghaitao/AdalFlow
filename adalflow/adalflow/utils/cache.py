@@ -5,7 +5,8 @@ from typing import Union
 
 
 def hash_text(text: str):
-    return hashlib.sha256(f"{text}".encode()).hexdigest()
+    # Performance Optimization: Avoid redundant f-string formatting when text is already a string.
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def hash_text_sha1(text: str):  # 160 bits
@@ -25,11 +26,9 @@ class CachedEngine:
         self.cache = dc.Cache(cache_path)
 
     def _check_cache(self, prompt: str):
+        # Performance Optimization: Single get() lookup instead of double membership and indexing.
         hash_key = hash_text(prompt)
-        if hash_key in self.cache:
-            return self.cache[hash_key]
-        else:
-            return None
+        return self.cache.get(hash_key)
 
     def _save_cache(self, prompt: str, response: str):
         hash_key = hash_text(prompt)
