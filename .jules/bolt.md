@@ -1,0 +1,3 @@
+## 2026-01-20 - Optimize Cache Keying and Verification Lookup
+**Learning:** Redundant string interpolation/formatting (e.g., `f"{text}"` where `text` is already a string) before encoding introduces unnecessary string copy and allocation overhead. Additionally, verifying cache existence using `hash_key in self.cache` followed by retrieval `self.cache[hash_key]` executes two lookups, which incurs duplicate disk/index query overhead on disk-backed storage backends like DiskCache.
+**Action:** Always avoid redundant string interpolation for existing string variables when calling `.encode()`. Furthermore, replace sequential conditional membership checks with a single atomic lookup via `.get()` to halve database/cache querying overhead on hot cache check paths.
