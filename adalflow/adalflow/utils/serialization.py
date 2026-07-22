@@ -125,6 +125,36 @@ def _deserialize_object_hook(d: Dict[str, Any]) -> Any:
     return d
 
 
+def _to_dict_recursive(obj: Any) -> Any:
+    """Recursively convert objects to dictionary representation, mirroring json serialization/deserialization.
+
+    This avoids expensive json.dumps/loads round-trips while perfectly preserving the expected behavior,
+    such as stringifying dictionary keys and converting tuples/sets to lists/custom representations.
+    """
+    t = type(obj)
+    # Fast-path for common built-in primitive types
+    if t in (str, int, float, bool):
+        return obj
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return {str(k): _to_dict_recursive(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_dict_recursive(v) for v in obj]
+    # Fallback for primitive subclasses (e.g. custom string types)
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # For any custom/specialized objects, invoke the default serializer hook and recursively convert
+    try:
+        serialized = default(obj)
+    except Exception as e:
+        raise TypeError(
+            f"Object of type {obj.__class__.__name__} is not JSON serializable: {str(e)}"
+        )
+    return _to_dict_recursive(serialized)
+
+
 def to_dict(obj: Any) -> Dict[str, Any]:
     """Convert the object to a dictionary.
 
@@ -134,4 +164,4 @@ def to_dict(obj: Any) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: The dictionary representation of the object.
     """
-    return json.loads(serialize(obj))
+    return _to_dict_recursive(obj)
