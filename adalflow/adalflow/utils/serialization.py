@@ -125,13 +125,38 @@ def _deserialize_object_hook(d: Dict[str, Any]) -> Any:
     return d
 
 
-def to_dict(obj: Any) -> Dict[str, Any]:
-    """Convert the object to a dictionary.
+def to_dict(obj: Any) -> Any:
+    """Convert the object to a dictionary/list/primitive representation recursively.
+
+    This directly and recursively serializes the object, avoiding expensive JSON
+    serialization and deserialization round-trips.
 
     Args:
         obj (Any): The object to be converted.
 
     Returns:
-        Dict[str, Any]: The dictionary representation of the object.
+        Any: The dictionary/list/primitive representation of the object.
     """
-    return json.loads(serialize(obj))
+    if isinstance(obj, dict):
+        return {str(k): to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [to_dict(v) for v in obj]
+    elif isinstance(obj, set):
+        return {"type": "set", "data": [to_dict(v) for v in obj]}
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+
+    res = default(obj)
+    # Check if the serialized result represents a fallback for un-serializable objects
+    # of the form {"type": type_name, "data": str_representation}.
+    if (
+        isinstance(res, dict)
+        and "type" in res
+        and "data" in res
+        and len(res) == 2
+        and res["type"] == type(obj).__name__
+        and isinstance(res["data"], str)
+    ):
+        return res
+
+    return to_dict(res)
