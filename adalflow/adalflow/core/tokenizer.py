@@ -2,8 +2,8 @@
 Tokenizer from tiktoken.
 """
 
+
 import tiktoken
-from typing import List
 
 # from adalflow.core.component import BaseComponent
 
@@ -24,25 +24,25 @@ class Tokenizer:
         self.name = name
         self.tokenizer = tiktoken.get_encoding(name)
         self.stop_words = (
-            set(["and", "the", "is", "in", "at", "of", "a", "an"])
+            {"and", "the", "is", "in", "at", "of", "a", "an"}
             if remove_stop_words
             else set()
         )
 
     # call is the same as forward/encode, so that we can use it in Sequential
-    def __call__(self, input: str) -> List[str]:
+    def __call__(self, input: str) -> list[str]:
         return self.encode(input)
 
-    def preprocess(self, text: str) -> List[str]:
+    def preprocess(self, text: str) -> list[str]:
         # Lowercase the text
         words = text.lower().split()
         return words
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         r"""Encodes the input text/word into token IDs."""
         return self.tokenizer.encode(text)
 
-    def decode(self, tokens: List[str]) -> str:
+    def decode(self, tokens: list[str]) -> str:
         r"""Decodes the input tokens into text."""
         return self.tokenizer.decode(tokens)
 
@@ -50,7 +50,13 @@ class Tokenizer:
         r"""Counts the number of tokens in the input text."""
         return len(self.encode(text))
 
-    def get_string_tokens(self, text: str) -> List[str]:
-        r"""Returns the string tokens from the input text."""
+    def get_string_tokens(self, text: str) -> list[str]:
+        r"""Returns the string tokens from the input text.
+
+        Optimized using `decode_tokens_bytes` to avoid decoding token IDs one-by-one.
+        """
         token_ids = self.encode(text)
-        return [self.tokenizer.decode([token_id]) for token_id in token_ids]
+        return [
+            b.decode("utf-8", errors="replace")
+            for b in self.tokenizer.decode_tokens_bytes(token_ids)
+        ]
