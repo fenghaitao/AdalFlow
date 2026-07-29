@@ -19,6 +19,7 @@ from typing import (
     TypeVar,
 )
 import logging
+import random
 import numpy as np
 from enum import Enum
 import re
@@ -256,7 +257,6 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
     if is_dataclass(cls) or is_potential_dataclass(
         cls
     ):  # Optional[Address] will be false, and true for each check
-
         log.debug(
             f"{is_dataclass(cls)} of {cls}, {is_potential_dataclass(cls)} of {cls}"
         )
@@ -941,7 +941,6 @@ def get_top_k_indices_scores(
 
 
 def generate_readable_key_for_function(fn: Callable) -> str:
-
     module_name = fn.__module__
     function_name = fn.__name__
     return f"{module_name}.{function_name}"
@@ -1055,10 +1054,10 @@ def extract_function_expression(
 
 def _is_valid_json_str(text: str) -> bool:
     """Helper function to check if a string is valid JSON.
-    
+
     Args:
         text (str): The text to validate as JSON.
-        
+
     Returns:
         bool: True if the text is valid JSON, False otherwise.
     """
@@ -1089,24 +1088,22 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     """
     # NOTE: this regex parsing is taken from langchain.output_parsers.pydantic
     text = text.strip()
-    
+
     # First check if the text is already a valid JSON string
     if _is_valid_json_str(text):
         return text
-    
+
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
+    malformed_pattern = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
     malformed_match = malformed_pattern.match(text)
-    if malformed_match and text.endswith('```}'):
+    if malformed_match and text.endswith("```}"):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
         # Validate using helper function
         if _is_valid_json_str(potential_json):
             return potential_json
-    
+
     # Then check if the JSON is wrapped in markdown code blocks
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
@@ -1114,7 +1111,9 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     json_markdown_pattern = re.compile(
         r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
     )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = json_markdown_pattern.match(
+        text
+    )  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1123,7 +1122,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
             return json_content
         # If not valid, continue with the extraction logic on the markdown content
         text = json_content
-    
+
     start_obj = text.find("{")
     start_arr = text.find("[")
     if start_obj == -1 and start_arr == -1:
@@ -1159,7 +1158,9 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
 
     extracted_json = text[start : end + 1]
 
-    return extracted_json.strip()  # Return the extracted JSON string without leading/trailing spaces
+    return (
+        extracted_json.strip()
+    )  # Return the extracted JSON string without leading/trailing spaces
 
 
 def extract_list_str(text: str, add_missing_right_bracket: bool = True) -> str:
@@ -1309,7 +1310,6 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
         except json.JSONDecodeError:
             # 3rd attemp using yaml
             try:
-
                 # NOTE: parsing again with pyyaml
                 #       pyyaml is less strict, and allows for trailing commas
                 #       right now we rely on this since guidance program generates
@@ -1328,13 +1328,13 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
 ########################################################################################
 def encode_image(image_path: str) -> str:
     """Encode an image file to base64 string.
-    
+
     Args:
         image_path (str): Path to the image file.
-        
+
     Returns:
         str: Base64 encoded string of the image.
-        
+
     Raises:
         FileNotFoundError: If the image file does not exist.
         PermissionError: If there's no permission to read the file.
@@ -1346,7 +1346,9 @@ def encode_image(image_path: str) -> str:
     except FileNotFoundError:
         raise FileNotFoundError(f"Image file not found: {image_path}")
     except PermissionError:
-        raise PermissionError(f"Permission denied when reading image file: {image_path}")
+        raise PermissionError(
+            f"Permission denied when reading image file: {image_path}"
+        )
     except Exception as e:
         raise Exception(f"Error encoding image {image_path}: {str(e)}")
 
@@ -1374,16 +1376,35 @@ def random_sample(
         )
         num_shots = dataset_size
 
-    if weights is not None:
-        weights = np.array(weights)
-        # Add a small delta to all weights to avoid zero probabilities
-        weights = weights + delta
-        if weights.sum() == 0:
-            raise ValueError("Sum of weights cannot be zero.")
-        # Normalize weights to sum to 1
-        weights = weights / weights.sum()
+    # Fast path when no weights are supplied
+    if weights is None:
+        if replace:
+            # random.choices is much faster than np.random.choice for simple random sampling with replacement
+            return random.choices(dataset, k=num_shots)
+        else:
+            # random.sample is much faster than np.random.choice for simple random sampling without replacement
+            return random.sample(dataset, num_shots)
 
-    indices = np.random.choice(len(dataset), size=num_shots, replace=replace, p=weights)
+    # When weights are supplied
+    # If replace is True, random.choices supports weights and is significantly faster than np.random.choice
+    if replace:
+        weights_array = np.array(weights) + delta
+        weights_sum = weights_array.sum()
+        if weights_sum == 0:
+            raise ValueError("Sum of weights cannot be zero.")
+        # random.choices accepts a list of weights (relative weights are fine, no need to manually normalize)
+        return random.choices(dataset, weights=weights_array.tolist(), k=num_shots)
+
+    # Weighted sampling without replacement
+    weights_array = np.array(weights) + delta
+    weights_sum = weights_array.sum()
+    if weights_sum == 0:
+        raise ValueError("Sum of weights cannot be zero.")
+    normalized_weights = weights_array / weights_sum
+
+    indices = np.random.choice(
+        len(dataset), size=num_shots, replace=replace, p=normalized_weights
+    )
 
     return [dataset[i] for i in indices]
 
