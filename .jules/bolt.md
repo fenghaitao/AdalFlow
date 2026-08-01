@@ -1,0 +1,7 @@
+## 2026-08-01 - Replacing standard JSON round-trip `json.loads(serialize(obj))` with custom recursive traversal
+**Learning:** Hand-writing custom recursive traversal to replace standard JSON serialization/deserialization for general structures risks bypassing critical validation steps. Specifically, custom traversal can silently convert non-serializable objects (like functions or generators) into string representations `{"type": ..., "data": ...}` instead of raising a `TypeError` at serialization time. This leads to silent serialization bugs and major deserialization issues down the road. Furthermore, duplicating serialization logic leads to code maintenance divergence.
+**Action:** Preserve robust and standard serialization paths like `json.loads(serialize(obj))` for general top-level functions unless absolutely necessary, or ensure that custom serialization paths strictly enforce the same exceptions and schema constraints.
+
+## 2026-08-01 - Assuming tiktoken-specific tokenizer API in generic wrappers
+**Learning:** Optimizing a generic `Tokenizer` wrapper by calling `decode_single_token_bytes` assumes the underlying engine is always `tiktoken`. While this works for the default setup, custom user backends or other tokenizer engines will fail with an `AttributeError`.
+**Action:** Use defensive programming with `getattr(self.tokenizer, "decode_single_token_bytes", None)` to dynamically detect `tiktoken` and leverage the 2x faster decoding path while providing a bulletproof fallback to standard loop-based `.decode([token_id])` for other backends.
