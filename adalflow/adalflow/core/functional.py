@@ -19,6 +19,7 @@ from typing import (
     TypeVar,
 )
 import logging
+import random
 import numpy as np
 from enum import Enum
 import re
@@ -1374,16 +1375,25 @@ def random_sample(
         )
         num_shots = dataset_size
 
-    if weights is not None:
-        weights = np.array(weights)
-        # Add a small delta to all weights to avoid zero probabilities
-        weights = weights + delta
-        if weights.sum() == 0:
-            raise ValueError("Sum of weights cannot be zero.")
-        # Normalize weights to sum to 1
-        weights = weights / weights.sum()
+    if weights is None:
+        if replace:
+            # Fast-path for sampling with replacement when no weights are provided
+            return random.choices(dataset, k=num_shots)
+        else:
+            # Fast-path for sampling without replacement when no weights are provided
+            return random.sample(dataset, k=num_shots)
 
-    indices = np.random.choice(len(dataset), size=num_shots, replace=replace, p=weights)
+    weights_np = np.array(weights) + delta
+    weights_sum = weights_np.sum()
+    if weights_sum == 0:
+        raise ValueError("Sum of weights cannot be zero.")
+    normalized_weights = weights_np / weights_sum
+
+    if replace:
+        # Fast-path for sampling with replacement when weights are provided
+        return random.choices(dataset, weights=normalized_weights.tolist(), k=num_shots)
+
+    indices = np.random.choice(len(dataset), size=num_shots, replace=replace, p=normalized_weights)
 
     return [dataset[i] for i in indices]
 
