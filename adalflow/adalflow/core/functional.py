@@ -28,6 +28,11 @@ import ast
 import threading
 import base64
 
+try:
+    from yaml import CSafeLoader as SafeLoader, CDumper as Dumper
+except ImportError:
+    from yaml import SafeLoader, Dumper
+
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
 
@@ -348,7 +353,7 @@ def from_dict_to_json(data: Dict[str, Any], sort_keys: bool = False) -> str:
 def from_dict_to_yaml(data: Dict[str, Any], sort_keys: bool = False) -> str:
     r"""Convert a dictionary to a YAML string."""
     try:
-        return yaml.dump(data, default_flow_style=False, sort_keys=sort_keys)
+        return yaml.dump(data, Dumper=Dumper, default_flow_style=False, sort_keys=sort_keys)
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to convert dict to YAML: {e}")
 
@@ -364,7 +369,7 @@ def from_json_to_dict(json_str: str) -> Dict[str, Any]:
 def from_yaml_to_dict(yaml_str: str) -> Dict[str, Any]:
     r"""Convert a YAML string to a dictionary."""
     try:
-        return yaml.safe_load(yaml_str)
+        return yaml.load(yaml_str, Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to convert YAML to dict: {e}")
 
@@ -1273,7 +1278,7 @@ def parse_yaml_str_to_obj(yaml_str: str) -> Dict[str, Any]:
     try:
         import yaml
 
-        yaml_obj = yaml.safe_load(yaml_str)
+        yaml_obj = yaml.load(yaml_str, Loader=SafeLoader)
         return yaml_obj
     except yaml.YAMLError as e:
         raise ValueError(
@@ -1315,7 +1320,7 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
                 #       right now we rely on this since guidance program generates
                 #       trailing commas
                 log.info("Parsing JSON string with PyYAML...")
-                json_obj = yaml.safe_load(json_str)
+                json_obj = yaml.load(json_str, Loader=SafeLoader)
                 return json_obj
             except yaml.YAMLError as e:
                 raise ValueError(

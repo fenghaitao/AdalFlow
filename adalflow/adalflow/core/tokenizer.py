@@ -53,4 +53,12 @@ class Tokenizer:
     def get_string_tokens(self, text: str) -> List[str]:
         r"""Returns the string tokens from the input text."""
         token_ids = self.encode(text)
+        decode_single = getattr(self.tokenizer, "decode_single_token_bytes", None)
+        if decode_single is not None:
+            # High-performance fast path for tiktoken backends
+            return [
+                decode_single(token_id).decode("utf-8", errors="replace")
+                for token_id in token_ids
+            ]
+        # Safe fallback for generic backends
         return [self.tokenizer.decode([token_id]) for token_id in token_ids]

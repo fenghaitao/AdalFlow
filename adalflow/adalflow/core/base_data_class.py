@@ -18,6 +18,11 @@ import json
 import yaml
 import logging
 
+try:
+    from yaml import CSafeLoader as SafeLoader, CDumper as Dumper
+except ImportError:
+    from yaml import SafeLoader, Dumper
+
 from adalflow.core.functional import (
     # dataclass_obj_to_dict,
     custom_asdict,
@@ -53,6 +58,7 @@ class DataClassFormatType(enum.Enum):
 
 # Register the custom representer
 yaml.add_representer(collections.OrderedDict, represent_ordereddict)
+yaml.add_representer(collections.OrderedDict, represent_ordereddict, Dumper=Dumper)
 
 
 def required_field() -> Callable[[], Any]:
@@ -460,7 +466,7 @@ class DataClass:
             trec_data = TrecData.from_yaml(yaml_str)
         """
         try:
-            data = yaml.safe_load(yaml_str)
+            data = yaml.load(yaml_str, Loader=SafeLoader)
             return cls.from_dict(data)
         except yaml.YAMLError as e:
             raise ValueError(f"Failed to load YAML string: {e}")
@@ -538,7 +544,7 @@ class DataClass:
 
         exclude (Optional[Dict[str, List[str]]], optional): A dictionary of fields to exclude for each dataclass object. Defaults to None.
         """
-        return yaml.safe_load(self.to_yaml(exclude=exclude, include=include))
+        return yaml.load(self.to_yaml(exclude=exclude, include=include), Loader=SafeLoader)
 
     def to_yaml(
         self,
@@ -555,6 +561,7 @@ class DataClass:
         """
         return yaml.dump(
             self.to_dict(exclude=exclude, include=include),
+            Dumper=Dumper,
             default_flow_style=False,
             sort_keys=False,
         ).strip()
@@ -568,7 +575,7 @@ class DataClass:
         Returns:
             str: The YAML string representation of the dictionary.
         """
-        return yaml.dump(data, default_flow_style=False, sort_keys=False).strip()
+        return yaml.dump(data, Dumper=Dumper, default_flow_style=False, sort_keys=False).strip()
 
     @classmethod
     def to_schema(
