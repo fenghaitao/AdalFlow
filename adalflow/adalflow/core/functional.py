@@ -27,6 +27,12 @@ import yaml
 import ast
 import threading
 import base64
+import random
+
+try:
+    from yaml import CSafeLoader as SafeLoader, CDumper as Dumper
+except ImportError:
+    from yaml import SafeLoader, Dumper
 
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
@@ -348,7 +354,8 @@ def from_dict_to_json(data: Dict[str, Any], sort_keys: bool = False) -> str:
 def from_dict_to_yaml(data: Dict[str, Any], sort_keys: bool = False) -> str:
     r"""Convert a dictionary to a YAML string."""
     try:
-        return yaml.dump(data, default_flow_style=False, sort_keys=sort_keys)
+        # Optimized with CDumper when available
+        return yaml.dump(data, default_flow_style=False, sort_keys=sort_keys, Dumper=Dumper)
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to convert dict to YAML: {e}")
 
@@ -364,7 +371,8 @@ def from_json_to_dict(json_str: str) -> Dict[str, Any]:
 def from_yaml_to_dict(yaml_str: str) -> Dict[str, Any]:
     r"""Convert a YAML string to a dictionary."""
     try:
-        return yaml.safe_load(yaml_str)
+        # Optimized with CSafeLoader when available
+        return yaml.load(yaml_str, Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to convert YAML to dict: {e}")
 
@@ -1271,9 +1279,8 @@ def parse_yaml_str_to_obj(yaml_str: str) -> Dict[str, Any]:
     """
     yaml_str = yaml_str.strip()
     try:
-        import yaml
-
-        yaml_obj = yaml.safe_load(yaml_str)
+        # Optimized with CSafeLoader when available
+        yaml_obj = yaml.load(yaml_str, Loader=SafeLoader)
         return yaml_obj
     except yaml.YAMLError as e:
         raise ValueError(
@@ -1315,7 +1322,8 @@ def parse_json_str_to_obj(json_str: str) -> Union[Dict[str, Any], List[Any]]:
                 #       right now we rely on this since guidance program generates
                 #       trailing commas
                 log.info("Parsing JSON string with PyYAML...")
-                json_obj = yaml.safe_load(json_str)
+                # Optimized with CSafeLoader when available
+                json_obj = yaml.load(json_str, Loader=SafeLoader)
                 return json_obj
             except yaml.YAMLError as e:
                 raise ValueError(
@@ -1374,18 +1382,26 @@ def random_sample(
         )
         num_shots = dataset_size
 
-    if weights is not None:
-        weights = np.array(weights)
-        # Add a small delta to all weights to avoid zero probabilities
-        weights = weights + delta
-        if weights.sum() == 0:
+    # Fast paths using python's built-in random module to avoid heavy numpy overhead
+    if weights is None:
+        if not replace:
+            return random.sample(dataset, num_shots)
+        else:
+            return random.choices(dataset, k=num_shots)
+
+    # For weighted sampling
+    # Add a small delta to all weights to avoid zero probabilities
+    adj_weights = [w + delta for w in weights]
+    if replace:
+        return random.choices(dataset, weights=adj_weights, k=num_shots)
+    else:
+        weights_np = np.array(adj_weights)
+        weights_sum = weights_np.sum()
+        if weights_sum == 0:
             raise ValueError("Sum of weights cannot be zero.")
-        # Normalize weights to sum to 1
-        weights = weights / weights.sum()
-
-    indices = np.random.choice(len(dataset), size=num_shots, replace=replace, p=weights)
-
-    return [dataset[i] for i in indices]
+        weights_np = weights_np / weights_sum
+        indices = np.random.choice(dataset_size, size=num_shots, replace=False, p=weights_np)
+        return [dataset[i] for i in indices]
 
 
 def _is_pydantic_dataclass(cls: Any) -> bool:
