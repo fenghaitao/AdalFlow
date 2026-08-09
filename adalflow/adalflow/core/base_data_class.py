@@ -25,6 +25,8 @@ from adalflow.core.functional import (
     get_dataclass_schema,
     convert_schema_to_signature,
     represent_ordereddict,
+    SafeLoader,
+    Dumper,
 )
 
 __all__ = [
@@ -53,6 +55,8 @@ class DataClassFormatType(enum.Enum):
 
 # Register the custom representer
 yaml.add_representer(collections.OrderedDict, represent_ordereddict)
+if Dumper is not yaml.Dumper:
+    yaml.add_representer(collections.OrderedDict, represent_ordereddict, Dumper=Dumper)
 
 
 def required_field() -> Callable[[], Any]:
@@ -460,7 +464,8 @@ class DataClass:
             trec_data = TrecData.from_yaml(yaml_str)
         """
         try:
-            data = yaml.safe_load(yaml_str)
+            # Optimized with CSafeLoader when available
+            data = yaml.load(yaml_str, Loader=SafeLoader)
             return cls.from_dict(data)
         except yaml.YAMLError as e:
             raise ValueError(f"Failed to load YAML string: {e}")
@@ -538,7 +543,8 @@ class DataClass:
 
         exclude (Optional[Dict[str, List[str]]], optional): A dictionary of fields to exclude for each dataclass object. Defaults to None.
         """
-        return yaml.safe_load(self.to_yaml(exclude=exclude, include=include))
+        # Optimized with CSafeLoader when available
+        return yaml.load(self.to_yaml(exclude=exclude, include=include), Loader=SafeLoader)
 
     def to_yaml(
         self,
@@ -553,10 +559,12 @@ class DataClass:
 
         exclude (Optional[Dict[str, List[str]]], optional): A dictionary of fields to exclude for each dataclass object. Defaults to None.
         """
+        # Optimized with CDumper when available
         return yaml.dump(
             self.to_dict(exclude=exclude, include=include),
             default_flow_style=False,
             sort_keys=False,
+            Dumper=Dumper,
         ).strip()
 
     def dict_to_yaml(self, data: Dict[str, Any]) -> str:
@@ -568,7 +576,8 @@ class DataClass:
         Returns:
             str: The YAML string representation of the dictionary.
         """
-        return yaml.dump(data, default_flow_style=False, sort_keys=False).strip()
+        # Optimized with CDumper when available
+        return yaml.dump(data, default_flow_style=False, sort_keys=False, Dumper=Dumper).strip()
 
     @classmethod
     def to_schema(
