@@ -225,6 +225,29 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
         """
         return self._estimated_token_count
 
+    @property
+    def template(self) -> Optional[str]:
+        return getattr(self, "_template", None)
+
+    @template.setter
+    def template(self, value: Optional[str]) -> None:
+        self._template = value
+        self._update_prompt()
+
+    @property
+    def prompt_kwargs(self) -> Optional[Dict]:
+        return getattr(self, "_prompt_kwargs", {})
+
+    @prompt_kwargs.setter
+    def prompt_kwargs(self, value: Optional[Dict]) -> None:
+        self._prompt_kwargs = value.copy() if value is not None else {}
+        self._update_prompt()
+
+    def _update_prompt(self) -> None:
+        if hasattr(self, "_template") and hasattr(self, "_prompt_kwargs"):
+            # Cache the Prompt instance so we avoid redundant template parsing and instantiation
+            self.prompt = Prompt(template=self._template, prompt_kwargs=self._prompt_kwargs)
+
     def update_default_backward_pass_setup(self, setup: BackwardPassSetup):
         self.backward_pass_setup = setup
 
@@ -342,17 +365,12 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.print_prompt(**kwargs)
+        # Uses the cached Prompt instance for fast prompt rendering
+        return self.prompt.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.call(**kwargs)
-
-    def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
-        return s
+        # Uses the cached Prompt instance for fast prompt rendering
+        return self.prompt.call(**kwargs)
 
     def _post_call(self, completion: Any) -> GeneratorOutput:
         r"""Get string completion and process it with the output_processors."""
@@ -1405,7 +1423,7 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     def _extra_repr(self) -> str:
         # Create the string for model_kwargs
-        s = f"model_kwargs={self.model_kwargs}, "
+        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={getattr(self, 'prompt', None)}"
 
         # Create the string for trainable prompt_kwargs
         prompt_kwargs_repr = [
@@ -1414,7 +1432,8 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             if isinstance(v, Parameter) and v.requires_opt
         ]
 
-        s += f"trainable_prompt_kwargs={prompt_kwargs_repr}"
+        if prompt_kwargs_repr:
+            s += f", trainable_prompt_kwargs={prompt_kwargs_repr}"
         return s
 
     def to_dict(self) -> Dict[str, Any]:
