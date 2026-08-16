@@ -196,6 +196,8 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             False  # this is important to check if the retrieve is possible
         )
         self.total_documents: int = 0
+        self._doc_len_norm = None
+        self._inverted_index = {}
 
     def _apply_split_function(self, documents: List[str]):
         if self._split_function is None:
@@ -230,6 +232,28 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
 
         self.avgdl = sum(self.doc_len) / len(corpus)
 
+        # Pre-compute document length normalization array for BM25 score calculation
+        doc_len_arr = np.array(self.doc_len, dtype=np.float32)
+        self._doc_len_norm = self.k1 * (
+            1 - self.b + self.b * doc_len_arr / (self.avgdl or 1.0)
+        )
+
+        # Build inverted index mapping term -> (doc_ids_array, freqs_array)
+        inverted: Dict[str, Any] = {}
+        for doc_id, doc in enumerate(self.t2d):
+            for term, freq in doc.items():
+                if term not in inverted:
+                    inverted[term] = ([], [])
+                inverted[term][0].append(doc_id)
+                inverted[term][1].append(freq)
+
+        self._inverted_index = {}
+        for term, (doc_ids, freqs) in inverted.items():
+            self._inverted_index[term] = (
+                np.array(doc_ids, dtype=np.int32),
+                np.array(freqs, dtype=np.float32),
+            )
+
     def _calc_idf(self):
         idf_sum = 0
         negative_idf = (
@@ -251,20 +275,22 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             self.idf[token] = eps
 
     def _get_scores(self, query: List[str]) -> List[float]:
-        r"""Calculate the BM25 score for the query and the documents in the corpus
+        r"""Calculate the BM25 score for the query and the documents in the corpus using inverted index.
 
         Args:
             query: List[str]: The tokenized query
         """
-        score = np.zeros(self.total_documents)
-        doc_len = np.array(self.doc_len)
+        score = np.zeros(self.total_documents, dtype=np.float32)
+        if self._doc_len_norm is None or not self._inverted_index:
+            return score.tolist()
+
         for q in query:
-            q_freq = np.array([(doc.get(q) or 0) for doc in self.t2d])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
-                * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
-            )
+            idf = self.idf.get(q)
+            if not idf or q not in self._inverted_index:
+                continue
+            doc_ids, q_freq = self._inverted_index[q]
+            denom = q_freq + self._doc_len_norm[doc_ids]
+            score[doc_ids] += idf * (q_freq * (self.k1 + 1) / denom)
         return score.tolist()
 
     def _get_batch_scores(self, query: List[str], doc_ids: List[int]) -> List[float]:
