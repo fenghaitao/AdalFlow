@@ -177,7 +177,12 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             "b",
             "epsilon",
             "indexed",
-            "use_tokenizer",
+            "_use_tokenizer",
+            "training",
+            "teacher_mode",
+            "tracing",
+            "_components",
+            "_parameters",
         ]
         # initialize the index
         self.reset_index()
@@ -196,6 +201,8 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             False  # this is important to check if the retrieve is possible
         )
         self.total_documents: int = 0
+        self._inverted_index: Optional[Dict[str, Any]] = None
+        self._doc_len_norm: Optional[np.ndarray] = None
 
     def _apply_split_function(self, documents: List[str]):
         if self._split_function is None:
@@ -250,20 +257,58 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         for token in negative_idf:
             self.idf[token] = eps
 
+    def _build_inverted_index(self):
+        """Build precomputed inverted index and document length normalization array for fast scoring."""
+        if self.total_documents == 0 or not self.doc_len:
+            self._doc_len_norm = np.array([], dtype=np.float32)
+            self._inverted_index = {}
+            return
+
+        doc_len_arr = np.array(self.doc_len, dtype=np.float32)
+        avgdl = self.avgdl if self.avgdl > 0 else 1.0
+        # Precompute length normalization term: k1 * (1 - b + b * (|d| / avgdl))
+        self._doc_len_norm = self.k1 * (1.0 - self.b + self.b * (doc_len_arr / avgdl))
+
+        inv_indices: Dict[str, List[int]] = {}
+        inv_freqs: Dict[str, List[float]] = {}
+        for doc_idx, term_freq in enumerate(self.t2d):
+            for token, freq in term_freq.items():
+                if token not in inv_indices:
+                    inv_indices[token] = []
+                    inv_freqs[token] = []
+                inv_indices[token].append(doc_idx)
+                inv_freqs[token].append(freq)
+
+        self._inverted_index = {
+            token: (
+                np.array(inv_indices[token], dtype=np.int32),
+                np.array(inv_freqs[token], dtype=np.float32),
+            )
+            for token in inv_indices
+        }
+
     def _get_scores(self, query: List[str]) -> List[float]:
         r"""Calculate the BM25 score for the query and the documents in the corpus
 
         Args:
             query: List[str]: The tokenized query
         """
-        score = np.zeros(self.total_documents)
-        doc_len = np.array(self.doc_len)
+        if getattr(self, "_doc_len_norm", None) is None or getattr(self, "_inverted_index", None) is None:
+            self._build_inverted_index()
+
+        score = np.zeros(self.total_documents, dtype=np.float32)
         for q in query:
-            q_freq = np.array([(doc.get(q) or 0) for doc in self.t2d])
-            score += (self.idf.get(q) or 0) * (
+            if q not in self._inverted_index:
+                continue
+            idf = self.idf.get(q, 0.0)
+            if idf == 0.0:
+                continue
+            doc_indices, q_freq = self._inverted_index[q]
+            len_norm = self._doc_len_norm[doc_indices]
+            score[doc_indices] += idf * (
                 q_freq
                 * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
+                / (q_freq + len_norm)
             )
         return score.tolist()
 
@@ -275,15 +320,32 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             doc_ids: List[int]: The list of document indexes to calculate the score
         """
         assert all(di < len(self.t2d) for di in doc_ids)
-        score = np.zeros(len(doc_ids))
-        doc_len = np.array(self.doc_len)[doc_ids]
+        if getattr(self, "_doc_len_norm", None) is None or getattr(self, "_inverted_index", None) is None:
+            self._build_inverted_index()
+
+        doc_map = np.full(self.total_documents, -1, dtype=np.int32)
+        doc_map[doc_ids] = np.arange(len(doc_ids), dtype=np.int32)
+        score = np.zeros(len(doc_ids), dtype=np.float32)
+
         for q in query:
-            q_freq = np.array([(self.t2d[di].get(q) or 0) for di in doc_ids])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
-                * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
+            if q not in self._inverted_index:
+                continue
+            idf = self.idf.get(q, 0.0)
+            if idf == 0.0:
+                continue
+            doc_indices, q_freq = self._inverted_index[q]
+            pos = doc_map[doc_indices]
+            valid = pos >= 0
+            if not np.any(valid):
+                continue
+            valid_pos = pos[valid]
+            valid_q_freq = q_freq[valid]
+            valid_doc_indices = doc_indices[valid]
+            len_norm = self._doc_len_norm[valid_doc_indices]
+            score[valid_pos] += idf * (
+                valid_q_freq * (self.k1 + 1) / (valid_q_freq + len_norm)
             )
+
         return score.tolist()
 
     def build_index_from_documents(
@@ -309,6 +371,7 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         self.tokenized_documents = self._apply_split_function(list_of_documents_str)
         self._initialize(self.tokenized_documents)
         self._calc_idf()
+        self._build_inverted_index()
         self.indexed = True
 
     def call(
@@ -361,7 +424,9 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
     def load_from_file(cls, path: str):
         # create an instance of the class
         try:
-            index_dict = load_json(path)
+            from adalflow.utils.file_io import load_standard_json
+
+            index_dict = load_standard_json(path)
             instance = cls.from_dict(index_dict)
             # add the split function
             instance._split_function = (
