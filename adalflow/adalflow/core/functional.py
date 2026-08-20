@@ -66,8 +66,10 @@ def custom_asdict(
 def _asdict_inner(obj, dict_factory, exclude):
     if is_dataclass_instance(obj):
         result = []
+        # Pre-compute excluded fields set for fast O(1) lookups per dataclass instance
+        excluded = set(exclude.get(obj.__class__.__name__, [])) if exclude else set()
         for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+            if f.name in excluded:
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
@@ -277,49 +279,31 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
         return restored_data
     elif isinstance(data, (list, tuple)):
         log.debug(f"List or Tuple: {cls}, {data}")
-        restored_data = []
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                restored_data.append(item)
+        # Hoist type inspection outside element iteration loop for performance
+        if check_if_class_field_args_zero_exists(cls):
+            target_cls = cls.__args__[0]
+            restored_data = [dataclass_obj_from_dict(target_cls, item) for item in data]
+        else:
+            restored_data = list(data)
         return restored_data
 
     elif isinstance(data, set):
         log.debug(f"Set: {cls}, {data}")
-        restored_data = set()
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                # Use the original data [Any]
-                restored_data.add(item)
+        # Hoist type inspection outside element iteration loop for performance
+        if check_if_class_field_args_zero_exists(cls):
+            target_cls = cls.__args__[0]
+            restored_data = {dataclass_obj_from_dict(target_cls, item) for item in data}
+        else:
+            restored_data = set(data)
         return restored_data
 
     elif isinstance(data, dict):
         log.debug(f"Dict: {cls}, {data}")
-        for key, value in data.items():
-            if check_data_class_field_args_one(cls):
-                # restore the value to its dataclass type
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            elif check_if_class_field_args_one_exists(cls):
-                # Use the original data [Any]
-
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            else:
-                # Use the original data [Any]
-                data[key] = value
+        # Hoist type inspection outside key-value iteration loop for performance
+        if check_if_class_field_args_one_exists(cls):
+            target_cls = cls.__args__[1]
+            for key, value in data.items():
+                data[key] = dataclass_obj_from_dict(target_cls, value)
         return data
     # else normal data like int, str, float, etc.
     else:
