@@ -1,0 +1,3 @@
+## 2026-03-01 - Dataclass Serialization & Deserialization Optimization
+**Learning:** In recursive serialization/deserialization utilities like `dataclass_obj_from_dict` and `_asdict_inner`, performing type inspections on `cls.__args__` or calling `fields(obj)` inside element loops adds massive overhead (~3.3x slowdown) when handling large container instances (lists, tuples, dicts).
+**Action:** Always hoist container type inspection checks outside element iteration loops in `dataclass_obj_from_dict`, and use `hasattr(obj, '__dataclass_fields__')` and `obj.__dataclass_fields__` directly in `_asdict_inner`.
