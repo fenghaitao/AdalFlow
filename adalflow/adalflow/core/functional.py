@@ -64,29 +64,34 @@ def custom_asdict(
 
 
 def _asdict_inner(obj, dict_factory, exclude):
-    if is_dataclass_instance(obj):
+    if hasattr(obj, "__dataclass_fields__"):
+        excluded_fields = (
+            set(exclude.get(obj.__class__.__name__, ())) if exclude else set()
+        )
         result = []
         for f in fields(obj):
-            if f.name in exclude.get(obj.__class__.__name__, []):
+            if f.name in excluded_fields:
                 continue
             value = _asdict_inner(getattr(obj, f.name), dict_factory, exclude)
             result.append((f.name, value))
         return dict_factory(result)
-    elif isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return type(obj)(*[_asdict_inner(v, dict_factory, exclude) for v in obj])
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(_asdict_inner(v, dict_factory, exclude) for v in obj)
+    elif isinstance(obj, list):
+        return [_asdict_inner(v, dict_factory, exclude) for v in obj]
     elif isinstance(obj, dict):
-        return type(obj)(
-            (
-                _asdict_inner(k, dict_factory, exclude),
-                _asdict_inner(v, dict_factory, exclude),
+        return {
+            _asdict_inner(k, dict_factory, exclude): _asdict_inner(
+                v, dict_factory, exclude
             )
             for k, v in obj.items()
-        )
+        }
+    elif isinstance(obj, tuple):
+        if hasattr(obj, "_fields"):
+            return type(obj)(
+                *[_asdict_inner(v, dict_factory, exclude) for v in obj]
+            )
+        return tuple(_asdict_inner(v, dict_factory, exclude) for v in obj)
     else:
         return obj
-        # return deepcopy(obj)
 
 
 # def dataclass_obj_to_dict(
@@ -249,7 +254,8 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
        # TrecDataList(data=[TrecData(question='What is the capital of France?', label=0)], name='trec_data_list')
 
     """
-    log.debug(f"Dataclass: {cls}, Data: {data}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("Dataclass: %s, Data: %s", cls, data)
     if data is None:
         return None
 
@@ -257,9 +263,14 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
         cls
     ):  # Optional[Address] will be false, and true for each check
 
-        log.debug(
-            f"{is_dataclass(cls)} of {cls}, {is_potential_dataclass(cls)} of {cls}"
-        )
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "%s of %s, %s of %s",
+                is_dataclass(cls),
+                cls,
+                is_potential_dataclass(cls),
+                cls,
+            )
         # Ensure the data is a dictionary
         if not isinstance(data, dict):
             raise ValueError(
@@ -276,54 +287,57 @@ def dataclass_obj_from_dict(cls: Type[object], data: Dict[str, object]) -> Any:
         )
         return restored_data
     elif isinstance(data, (list, tuple)):
-        log.debug(f"List or Tuple: {cls}, {data}")
-        restored_data = []
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.append(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                restored_data.append(item)
-        return restored_data
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("List or Tuple: %s, %s", cls, data)
+        if hasattr(cls, "__args__") and cls.__args__:
+            item_cls = cls.__args__[0]
+            if (
+                is_dataclass(item_cls)
+                or is_potential_dataclass(item_cls)
+                or hasattr(item_cls, "__args__")
+            ):
+                restored = [
+                    dataclass_obj_from_dict(item_cls, item) for item in data
+                ]
+                return tuple(restored) if isinstance(data, tuple) else restored
+        return data
 
     elif isinstance(data, set):
-        log.debug(f"Set: {cls}, {data}")
-        restored_data = set()
-        for item in data:
-            if check_data_class_field_args_zero(cls):
-                # restore the value to its dataclass type
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-            elif check_if_class_field_args_zero_exists(cls):
-                # Use the original data [Any]
-                restored_data.add(dataclass_obj_from_dict(cls.__args__[0], item))
-
-            else:
-                # Use the original data [Any]
-                restored_data.add(item)
-        return restored_data
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("Set: %s, %s", cls, data)
+        if hasattr(cls, "__args__") and cls.__args__:
+            item_cls = cls.__args__[0]
+            if (
+                is_dataclass(item_cls)
+                or is_potential_dataclass(item_cls)
+                or hasattr(item_cls, "__args__")
+            ):
+                return {
+                    dataclass_obj_from_dict(item_cls, item) for item in data
+                }
+        return data
 
     elif isinstance(data, dict):
-        log.debug(f"Dict: {cls}, {data}")
-        for key, value in data.items():
-            if check_data_class_field_args_one(cls):
-                # restore the value to its dataclass type
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            elif check_if_class_field_args_one_exists(cls):
-                # Use the original data [Any]
-
-                data[key] = dataclass_obj_from_dict(cls.__args__[1], value)
-            else:
-                # Use the original data [Any]
-                data[key] = value
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("Dict: %s, %s", cls, data)
+        if hasattr(cls, "__args__") and len(cls.__args__) > 1:
+            val_cls = cls.__args__[1]
+            if (
+                is_dataclass(val_cls)
+                or is_potential_dataclass(val_cls)
+                or hasattr(val_cls, "__args__")
+            ):
+                return {
+                    k: dataclass_obj_from_dict(val_cls, v)
+                    for k, v in data.items()
+                }
         return data
     # else normal data like int, str, float, etc.
     else:
-        log.debug(f"Not datclass, or list, or dict: {cls}, use the original data.")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "Not datclass, or list, or dict: %s, use the original data.", cls
+            )
         return data
 
 
