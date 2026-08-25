@@ -223,17 +223,22 @@ class TextSplitter(DataComponent):
         Returns:
             List[str]: A list of text chunks.
         """
+        text_splits, _ = self._split_text_internal(text)
+        return text_splits
+
+    def _split_text_internal(self, text: str):
+        """Internal helper to split text and optionally return token counts for chunks."""
         log.info(
             f"Splitting text with split_by: {self.split_by}, chunk_size: {self.chunk_size}, chunk_overlap: {self.chunk_overlap}"
         )
         separator = self.separators[self.split_by]
         splits = self._split_text_into_units(text, separator)
         log.info(f"Text split into {len(splits)} parts.")
-        chunks = self._merge_units_to_chunks(
-            splits, self.chunk_size, self.chunk_overlap, separator
+        text_splits, token_counts = self._merge_units_to_chunks(
+            splits, self.chunk_size, self.chunk_overlap, separator, return_token_counts=True
         )
-        log.info(f"Text merged into {len(chunks)} chunks.")
-        return chunks
+        log.info(f"Text merged into {len(text_splits)} chunks.")
+        return text_splits, token_counts
 
     def call(self, documents: DocumentSplitterInputType) -> DocumentSplitterOutputType:
         """
@@ -280,21 +285,38 @@ class TextSplitter(DataComponent):
                     log.error(f"Text should not be None. Doc id: {doc.id}")
                     raise ValueError(f"Text should not be None. Doc id: {doc.id}")
 
-                text_splits = self.split_text(doc.text)
+                text_splits, token_counts = self._split_text_internal(doc.text)
                 meta_data = deepcopy(doc.meta_data)
 
-                split_docs.extend(
-                    [
-                        Document(
-                            text=txt,
-                            meta_data=meta_data,
-                            parent_doc_id=f"{doc.id}",
-                            order=i,
-                            vector=[],
-                        )
-                        for i, txt in enumerate(text_splits)
-                    ]
-                )
+                if token_counts:
+                    # When split_by="token", bypass redundant re-encoding in Document.__post_init__
+                    # by passing estimated_num_tokens directly.
+                    split_docs.extend(
+                        [
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                                estimated_num_tokens=token_counts[i],
+                            )
+                            for i, txt in enumerate(text_splits)
+                        ]
+                    )
+                else:
+                    split_docs.extend(
+                        [
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                            )
+                            for i, txt in enumerate(text_splits)
+                        ]
+                    )
         log.info(
             f"Processed {len(documents)} documents into {len(split_docs)} split documents."
         )
@@ -310,12 +332,18 @@ class TextSplitter(DataComponent):
         return splits
 
     def _merge_units_to_chunks(
-        self, splits: List[str], chunk_size: int, chunk_overlap: int, separator: str
-    ) -> List[str]:
+        self,
+        splits: List[str],
+        chunk_size: int,
+        chunk_overlap: int,
+        separator: str,
+        return_token_counts: bool = False,
+    ):
         """
         Merge split text chunks based on the specified chunk size and overlap.
         """
         chunks = []
+        token_counts = [] if (self.split_by == "token" and return_token_counts) else None
         # we use a window to get the text for each trunk, the window size is chunk_size, step is chunk_size - chunk_overlap
         step = chunk_size - chunk_overlap
         idx = 0
@@ -330,6 +358,8 @@ class TextSplitter(DataComponent):
             # this won't be the last chunk, so we need to add the separator at the end
             if self.split_by == "token":
                 chunk = current_splits  # if token, then keep the original form
+                if token_counts is not None:
+                    token_counts.append(len(current_splits))
             else:
                 chunk = separator.join(current_splits) + separator
             chunks.append(chunk)
@@ -337,18 +367,24 @@ class TextSplitter(DataComponent):
         if idx < len(splits):
             if self.split_by == "token":
                 last_chunk = splits[idx:]  # if token, then keep the original form
+                if len(last_chunk) > 0:
+                    chunks.append(last_chunk)
+                    if token_counts is not None:
+                        token_counts.append(len(last_chunk))
             else:
                 last_chunk = separator.join(
                     splits[idx:]
                 )  # if not token, then join into string
-            if len(last_chunk) > 0:
-                chunks.append(last_chunk)
+                if len(last_chunk) > 0:
+                    chunks.append(last_chunk)
 
         if self.split_by == "token":
             # decode each chunk here
             chunks = [TextSplitter.tokenizer.decode(chunk) for chunk in chunks]
 
         log.info(f"Merged into {len(chunks)} chunks.")
+        if return_token_counts:
+            return chunks, token_counts
         return chunks
 
     def _extra_repr(self) -> str:
