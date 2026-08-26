@@ -1,0 +1,3 @@
+## 2026-03-30 - Generator Prompt Caching
+**Learning:** Re-instantiating `Prompt` objects inside `Generator.get_prompt()` on every call introduces substantial Jinja2 template parsing and environment setup overhead (~7.7ms/call). Caching `self.prompt` in `Generator.__init__` and updating it via `template` and `prompt_kwargs` property setters eliminates redundant object creations and template parsing.
+**Action:** Always prefer caching `DataComponent` or `Prompt` instances in container components when template structures are immutable per invocation, providing property getters/setters for dynamic attribute updates.
