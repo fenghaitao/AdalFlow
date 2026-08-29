@@ -166,8 +166,8 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
         CallbackManager.__init__(self)
 
         self.name = name or self.__class__.__name__
-        self.template = template
-        self.prompt_kwargs = prompt_kwargs.copy()
+        self._template = template
+        self._prompt_kwargs = prompt_kwargs.copy()
 
         self.model_kwargs = model_kwargs.copy()
         # init the model client
@@ -180,6 +180,10 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             raise ValueError(
                 f"output_processors should be a DataComponent instance, got {type(output_processors)}"
             )
+
+        # Cache Prompt instance to avoid redundant Jinja2 compilation and Prompt object instantiation
+        self.prompt = Prompt(template=self._template, prompt_kwargs=self._prompt_kwargs)
+        self.prompt.prompt_kwargs = self._prompt_kwargs
 
         self.set_parameters(prompt_kwargs)
 
@@ -209,6 +213,30 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
         self._tokenizer: Tokenizer = Tokenizer()
         self._estimated_token_count: int = 0
+
+    @property
+    def template(self) -> str:
+        return getattr(self, "_template", None)
+
+    @template.setter
+    def template(self, value: str):
+        self._template = value
+        self._update_prompt()
+
+    @property
+    def prompt_kwargs(self) -> Dict:
+        return getattr(self, "_prompt_kwargs", {})
+
+    @prompt_kwargs.setter
+    def prompt_kwargs(self, value: Dict):
+        self._prompt_kwargs = value.copy() if value else {}
+        self._update_prompt()
+
+    def _update_prompt(self):
+        """Update cached Prompt instance when template or prompt_kwargs change."""
+        if hasattr(self, "_template") and hasattr(self, "_prompt_kwargs"):
+            self.prompt = Prompt(template=self._template, prompt_kwargs=self._prompt_kwargs)
+            self.prompt.prompt_kwargs = self._prompt_kwargs
 
     @property
     def use_cache(self):
@@ -342,16 +370,13 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
     # TODO: use prompt_kwargs as users are already familiar with it
     def print_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.print_prompt(**kwargs)
+        return self.prompt.print_prompt(**kwargs)
 
     def get_prompt(self, **kwargs) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        return prompt.call(**kwargs)
+        return self.prompt.call(**kwargs)
 
     def _extra_repr(self) -> str:
-        prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
-        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={prompt}"
+        s = f"model_kwargs={self.model_kwargs}, model_type={self.model_type}, prompt={self.prompt}"
         return s
 
     def _post_call(self, completion: Any) -> GeneratorOutput:
