@@ -14,7 +14,7 @@ However, the following approaches are commonly shared:
 """
 
 from copy import deepcopy
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 from tqdm import tqdm
 import logging
 
@@ -223,17 +223,27 @@ class TextSplitter(DataComponent):
         Returns:
             List[str]: A list of text chunks.
         """
+        chunks, _ = self.split_text_with_token_counts(text)
+        return chunks
+
+    def split_text_with_token_counts(self, text: str) -> Tuple[List[str], List[Optional[int]]]:
+        """
+        Splits text into chunks and returns chunk token counts when split_by="token".
+
+        Returns:
+            Tuple[List[str], List[Optional[int]]]: Clean chunk strings and estimated token counts (or None).
+        """
         log.info(
             f"Splitting text with split_by: {self.split_by}, chunk_size: {self.chunk_size}, chunk_overlap: {self.chunk_overlap}"
         )
         separator = self.separators[self.split_by]
         splits = self._split_text_into_units(text, separator)
         log.info(f"Text split into {len(splits)} parts.")
-        chunks = self._merge_units_to_chunks(
+        chunks, token_counts = self._merge_units_to_chunks_with_counts(
             splits, self.chunk_size, self.chunk_overlap, separator
         )
         log.info(f"Text merged into {len(chunks)} chunks.")
-        return chunks
+        return chunks, token_counts
 
     def call(self, documents: DocumentSplitterInputType) -> DocumentSplitterOutputType:
         """
@@ -280,7 +290,7 @@ class TextSplitter(DataComponent):
                     log.error(f"Text should not be None. Doc id: {doc.id}")
                     raise ValueError(f"Text should not be None. Doc id: {doc.id}")
 
-                text_splits = self.split_text(doc.text)
+                text_splits, token_counts = self.split_text_with_token_counts(doc.text)
                 meta_data = deepcopy(doc.meta_data)
 
                 split_docs.extend(
@@ -291,6 +301,7 @@ class TextSplitter(DataComponent):
                             parent_doc_id=f"{doc.id}",
                             order=i,
                             vector=[],
+                            estimated_num_tokens=token_counts[i],
                         )
                         for i, txt in enumerate(text_splits)
                     ]
@@ -303,7 +314,7 @@ class TextSplitter(DataComponent):
     def _split_text_into_units(self, text: str, separator: str) -> List[str]:
         """Split text based on the specified separator."""
         if self.split_by == "token":
-            splits = TextSplitter.tokenizer.encode(text)
+            splits = self.tokenizer.encode(text)
         else:
             splits = text.split(separator)
         log.info(f"Text split by '{separator}' into {len(splits)} parts.")
@@ -315,7 +326,19 @@ class TextSplitter(DataComponent):
         """
         Merge split text chunks based on the specified chunk size and overlap.
         """
+        chunks, _ = self._merge_units_to_chunks_with_counts(
+            splits, chunk_size, chunk_overlap, separator
+        )
+        return chunks
+
+    def _merge_units_to_chunks_with_counts(
+        self, splits: List[str], chunk_size: int, chunk_overlap: int, separator: str
+    ) -> Tuple[List[str], List[Optional[int]]]:
+        """
+        Merge split text chunks based on the specified chunk size and overlap, returning token counts.
+        """
         chunks = []
+        token_counts = []
         # we use a window to get the text for each trunk, the window size is chunk_size, step is chunk_size - chunk_overlap
         step = chunk_size - chunk_overlap
         idx = 0
@@ -330,8 +353,10 @@ class TextSplitter(DataComponent):
             # this won't be the last chunk, so we need to add the separator at the end
             if self.split_by == "token":
                 chunk = current_splits  # if token, then keep the original form
+                token_counts.append(len(current_splits))
             else:
                 chunk = separator.join(current_splits) + separator
+                token_counts.append(None)
             chunks.append(chunk)
 
         if idx < len(splits):
@@ -343,13 +368,17 @@ class TextSplitter(DataComponent):
                 )  # if not token, then join into string
             if len(last_chunk) > 0:
                 chunks.append(last_chunk)
+                if self.split_by == "token":
+                    token_counts.append(len(last_chunk))
+                else:
+                    token_counts.append(None)
 
         if self.split_by == "token":
             # decode each chunk here
-            chunks = [TextSplitter.tokenizer.decode(chunk) for chunk in chunks]
+            chunks = [self.tokenizer.decode(chunk) for chunk in chunks]
 
         log.info(f"Merged into {len(chunks)} chunks.")
-        return chunks
+        return chunks, token_counts
 
     def _extra_repr(self) -> str:
         s = f"split_by={self.split_by}, chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}"
