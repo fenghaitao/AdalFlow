@@ -13,22 +13,23 @@ However, the following approaches are commonly shared:
 * **Retrieval:** Leverage vectors for context retrieval.
 """
 
-from copy import deepcopy
-from typing import List, Literal, Optional
-from tqdm import tqdm
 import logging
+from copy import deepcopy
+from typing import Literal
+
+from tqdm import tqdm
 
 from adalflow.core.component import DataComponent
-from adalflow.core.types import Document
 from adalflow.core.tokenizer import Tokenizer
+from adalflow.core.types import Document
 
 # TODO:
 # More splitters such as PDF/JSON/HTML Splitter can be built on TextSplitter.
 
 log = logging.getLogger(__name__)
 
-DocumentSplitterInputType = List[Document]
-DocumentSplitterOutputType = List[Document]
+DocumentSplitterInputType = list[Document]
+DocumentSplitterOutputType = list[Document]
 
 # customizable seperators map
 SEPARATORS = {
@@ -162,7 +163,7 @@ class TextSplitter(DataComponent):
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         batch_size: int = 1000,
-        separators: Optional[dict] = SEPARATORS,
+        separators: dict | None = SEPARATORS,
     ):
         """
         Initializes the TextSplitter with the specified parameters for text splitting.
@@ -211,7 +212,7 @@ class TextSplitter(DataComponent):
             f"Initialized TextSplitter with split_by={self.split_by}, chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}, batch_size={self.batch_size}"
         )
 
-    def split_text(self, text: str) -> List[str]:
+    def split_text(self, text: str) -> list[str]:
         """
         Splits the provided text into chunks.
 
@@ -280,41 +281,75 @@ class TextSplitter(DataComponent):
                     log.error(f"Text should not be None. Doc id: {doc.id}")
                     raise ValueError(f"Text should not be None. Doc id: {doc.id}")
 
-                text_splits = self.split_text(doc.text)
                 meta_data = deepcopy(doc.meta_data)
 
-                split_docs.extend(
-                    [
-                        Document(
-                            text=txt,
-                            meta_data=meta_data,
-                            parent_doc_id=f"{doc.id}",
-                            order=i,
-                            vector=[],
+                if self.split_by == "token":
+                    # Optimization: For token-based splitting, we already know the token count for each chunk.
+                    # Passing estimated_num_tokens directly avoids redundant re-encoding in Document.__post_init__.
+                    separator = self.separators[self.split_by]
+                    splits = self._split_text_into_units(doc.text, separator)
+                    token_chunks = self._merge_units_to_chunks(
+                        splits,
+                        self.chunk_size,
+                        self.chunk_overlap,
+                        separator,
+                        return_token_chunks=True,
+                    )
+
+                    for i, tok_chunk in enumerate(token_chunks):
+                        txt = self.tokenizer.decode(tok_chunk)
+                        split_docs.append(
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                                estimated_num_tokens=len(tok_chunk),
+                            )
                         )
-                        for i, txt in enumerate(text_splits)
-                    ]
-                )
+                else:
+                    text_splits = self.split_text(doc.text)
+                    split_docs.extend(
+                        [
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                            )
+                            for i, txt in enumerate(text_splits)
+                        ]
+                    )
         log.info(
             f"Processed {len(documents)} documents into {len(split_docs)} split documents."
         )
         return split_docs
 
-    def _split_text_into_units(self, text: str, separator: str) -> List[str]:
+    def _split_text_into_units(self, text: str, separator: str) -> list[str]:
         """Split text based on the specified separator."""
         if self.split_by == "token":
-            splits = TextSplitter.tokenizer.encode(text)
+            splits = self.tokenizer.encode(text)
         else:
             splits = text.split(separator)
         log.info(f"Text split by '{separator}' into {len(splits)} parts.")
         return splits
 
     def _merge_units_to_chunks(
-        self, splits: List[str], chunk_size: int, chunk_overlap: int, separator: str
-    ) -> List[str]:
+        self,
+        splits: list,
+        chunk_size: int,
+        chunk_overlap: int,
+        separator: str,
+        return_token_chunks: bool = False,
+    ) -> list:
         """
         Merge split text chunks based on the specified chunk size and overlap.
         """
+        if not splits:
+            return []
+
         chunks = []
         # we use a window to get the text for each trunk, the window size is chunk_size, step is chunk_size - chunk_overlap
         step = chunk_size - chunk_overlap
@@ -344,9 +379,9 @@ class TextSplitter(DataComponent):
             if len(last_chunk) > 0:
                 chunks.append(last_chunk)
 
-        if self.split_by == "token":
+        if self.split_by == "token" and not return_token_chunks:
             # decode each chunk here
-            chunks = [TextSplitter.tokenizer.decode(chunk) for chunk in chunks]
+            chunks = [self.tokenizer.decode(chunk) for chunk in chunks]
 
         log.info(f"Merged into {len(chunks)} chunks.")
         return chunks

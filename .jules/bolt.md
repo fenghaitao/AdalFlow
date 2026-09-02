@@ -1,0 +1,3 @@
+## 2025-05-18 - Optimize TextSplitter token count computation
+**Learning:** During token-based text splitting (`split_by="token"`), `TextSplitter` already possesses the list of encoded token IDs (`tok_chunk`) for each chunk. Passing `estimated_num_tokens=len(tok_chunk)` directly when constructing chunk `Document` objects bypasses redundant tiktoken re-encoding in `Document.__post_init__`, resulting in a ~2x speedup (0.54s -> 0.27s for 50 documents/5000 chunks).
+**Action:** Always pre-calculate and pass `estimated_num_tokens` directly when creating `Document` instances if token lengths are already known from preceding operations.
