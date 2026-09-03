@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from typing import List, Dict
 from collections import OrderedDict
 
-from adalflow.core.functional import custom_asdict, dataclass_obj_from_dict
+import numpy as np
+from adalflow.core.functional import custom_asdict, dataclass_obj_from_dict, get_top_k_indices_scores
 from adalflow.core.base_data_class import DataClass
 
 
@@ -736,6 +737,38 @@ ordered_dict_data:
 
         reconstructed_complex_data_yaml = ComplexData2.from_yaml(complex_data_yaml)
         self.assertEqual(reconstructed_complex_data_yaml, complex_data)
+
+
+class TestGetTopKIndicesScores(unittest.TestCase):
+
+    def test_get_top_k_indices_scores_basic(self):
+        scores = [0.1, 0.5, 0.2, 0.9, 0.3]
+        indices, top_scores = get_top_k_indices_scores(scores, top_k=2)
+        self.assertEqual(indices, [3, 1])
+        self.assertEqual(top_scores, [0.9, 0.5])
+
+    def test_get_top_k_indices_scores_numpy_input(self):
+        scores = np.array([10.0, 50.0, 20.0, 90.0, 30.0])
+        indices, top_scores = get_top_k_indices_scores(scores, top_k=3)
+        self.assertEqual(indices, [3, 1, 4])
+        self.assertEqual(top_scores, [90.0, 50.0, 30.0])
+
+    def test_get_top_k_indices_scores_top_k_larger_than_len(self):
+        scores = [1.0, 3.0, 2.0]
+        indices, top_scores = get_top_k_indices_scores(scores, top_k=10)
+        self.assertEqual(indices, [1, 2, 0])
+        self.assertEqual(top_scores, [3.0, 2.0, 1.0])
+
+    def test_get_top_k_indices_scores_top_k_one(self):
+        scores = [0.1, 0.9, 0.5]
+        indices, top_scores = get_top_k_indices_scores(scores, top_k=1)
+        self.assertEqual(indices, [1])
+        self.assertEqual(top_scores, [0.9])
+
+    def test_get_top_k_indices_scores_empty(self):
+        indices, top_scores = get_top_k_indices_scores([], top_k=5)
+        self.assertEqual(indices, [])
+        self.assertEqual(top_scores, [])
 
 
 if __name__ == "__main__":

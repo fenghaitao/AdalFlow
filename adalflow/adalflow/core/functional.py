@@ -935,7 +935,16 @@ def get_top_k_indices_scores(
         scores_np = np.array(scores)
     else:
         scores_np = scores
-    top_k_indices = np.argsort(scores_np)[-top_k:][::-1]
+    n = len(scores_np)
+    if n == 0:
+        return [], []
+    if 0 < top_k < n:
+        # Fast path: use argpartition to find unsorted top_k in O(N) time instead of sorting the whole array in O(N log N)
+        partitioned = np.argpartition(scores_np, -top_k)[-top_k:]
+        # Sort only the top_k elements in descending order (O(k log k))
+        top_k_indices = partitioned[np.argsort(scores_np[partitioned])[::-1]]
+    else:
+        top_k_indices = np.argsort(scores_np)[-top_k:][::-1]
     top_k_scores = scores_np[top_k_indices]
     return top_k_indices.tolist(), top_k_scores.tolist()
 
