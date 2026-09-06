@@ -1,23 +1,26 @@
 """BM25 retriever implementation."""
 
-from typing import List, Dict, Optional, Callable, Any, Sequence
-import numpy as np
 import heapq
-import math
 import logging
+import math
+from collections.abc import Callable, Sequence
+from typing import Any
 
-from adalflow.core.tokenizer import Tokenizer
-from adalflow.core.types import (
-    RetrieverOutput,
-    RetrieverOutputType,
-    RetrieverStrQueryType,
-    RetrieverStrQueriesType,
-    RetrieverDocumentsType,
-)
+import numpy as np
+
+from adalflow.core.component import Component
 from adalflow.core.retriever import (
     Retriever,
 )
-from adalflow.utils.file_io import save_json, load_json
+from adalflow.core.tokenizer import Tokenizer
+from adalflow.core.types import (
+    RetrieverDocumentsType,
+    RetrieverOutput,
+    RetrieverOutputType,
+    RetrieverStrQueriesType,
+    RetrieverStrQueryType,
+)
+from adalflow.utils.file_io import load_standard_json, save_json
 
 log = logging.getLogger(__name__)
 
@@ -27,28 +30,28 @@ PARAM_EPSILON = 0.25
 
 
 # TODO: move the functions in core.functional
-def split_text_by_word_fn(x: str) -> List[str]:
+def split_text_by_word_fn(x: str) -> list[str]:
     x = x.lower()
     return x.split(" ")
 
 
-def split_text_by_word_fn_then_lower_tokenized(x: str) -> List[str]:
+def split_text_by_word_fn_then_lower_tokenized(x: str) -> list[str]:
     tokenizer = Tokenizer()
     words = x.lower().split(" ")
     tokens = [tokenizer.encode(word) for word in words]
-    final_tokens: List[str] = []
+    final_tokens: list[str] = []
     for token_list in tokens:
         for token in token_list:
             final_tokens.append(tokenizer.decode([token]))
     return final_tokens
 
 
-def split_text_tokenized(x: str) -> List[str]:
+def split_text_tokenized(x: str) -> list[str]:
     tokenizer = Tokenizer()
     # words = x.lower().split(" ")
     tokens = tokenizer.encode(x)
     # print(tokens)
-    final_tokens: List[str] = []
+    final_tokens: list[str] = []
     for token in tokens:
         final_tokens.append(tokenizer.decode([token]))
     # print(final_tokens)
@@ -141,8 +144,8 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         k1: float = PARAM_K1,
         b: float = PARAM_B,
         epsilon: float = PARAM_EPSILON,
-        documents: Optional[Sequence[Any]] = None,
-        document_map_func: Optional[Callable[[Any], str]] = None,
+        documents: Sequence[Any] | None = None,
+        document_map_func: Callable[[Any], str] | None = None,
         use_tokenizer: bool = True,
     ):
         r"""
@@ -187,17 +190,42 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
 
     def reset_index(self):
         r"""Used for both initializing and resetting the index."""
-        self.t2d: List[Dict[str, int]] = []  # term freuqency in each document
-        self.nd: Dict[str, int] = {}  # number of documents containing the term
-        self.idf: Dict[str, float] = {}  # idf of each term
-        self.doc_len: List[int] = []  # list of document lengths
+        self.t2d: list[dict[str, int]] = []  # term freuqency in each document
+        self.nd: dict[str, int] = {}  # number of documents containing the term
+        self.idf: dict[str, float] = {}  # idf of each term
+        self.doc_len: list[int] = []  # list of document lengths
         self.avgdl: float = 0  # average document length
         self.indexed: bool = (
             False  # this is important to check if the retrieve is possible
         )
         self.total_documents: int = 0
+        self._inverted_index: dict[str, Any] | None = None
+        self._doc_len_norm: np.ndarray | None = None
 
-    def _apply_split_function(self, documents: List[str]):
+    def _build_inverted_index(self):
+        """Construct inverted index and document length normalization factors for fast scoring."""
+        inverted: dict[str, Any] = {}
+        for doc_id, doc in enumerate(self.t2d):
+            for term, freq in doc.items():
+                if term not in inverted:
+                    inverted[term] = ([], [])
+                inverted[term][0].append(doc_id)
+                inverted[term][1].append(float(freq))
+
+        self._inverted_index = {
+            term: (
+                np.array(doc_ids, dtype=np.int32),
+                np.array(freqs, dtype=np.float64),
+            )
+            for term, (doc_ids, freqs) in inverted.items()
+        }
+        if self.avgdl > 0 and self.total_documents > 0:
+            doc_len = np.array(self.doc_len, dtype=np.float64)
+            self._doc_len_norm = self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)
+        else:
+            self._doc_len_norm = np.zeros(self.total_documents, dtype=np.float64)
+
+    def _apply_split_function(self, documents: list[str]):
         if self._split_function is None:
             raise ValueError("split_function is not defined")
         if not documents:
@@ -207,7 +235,7 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
 
         return tokenized_documents
 
-    def _initialize(self, corpus: List[List[str]]):
+    def _initialize(self, corpus: list[list[str]]):
         r"""Initialize the term to document dictionary with the term frequencies in each document.
         The corpi is a list of tokenized documents."""
 
@@ -235,7 +263,7 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         negative_idf = (
             []
         )  # idf can be negative if word is too common: more than half of the documents
-        self.idf: Dict[str, float] = {}
+        self.idf: dict[str, float] = {}
         for token, freq in self.nd.items():
             idf = math.log(self.total_documents - freq + 0.5) - math.log(freq + 0.5)
             self.idf[token] = idf
@@ -250,24 +278,31 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         for token in negative_idf:
             self.idf[token] = eps
 
-    def _get_scores(self, query: List[str]) -> List[float]:
+        self._build_inverted_index()
+
+    def _get_scores(self, query: list[str]) -> list[float]:
         r"""Calculate the BM25 score for the query and the documents in the corpus
 
         Args:
             query: List[str]: The tokenized query
         """
+        if self._inverted_index is None and self.indexed:
+            self._build_inverted_index()
+
+        if self._inverted_index is None or self.total_documents == 0:
+            return [0.0] * self.total_documents
+
         score = np.zeros(self.total_documents)
-        doc_len = np.array(self.doc_len)
         for q in query:
-            q_freq = np.array([(doc.get(q) or 0) for doc in self.t2d])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
-                * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
-            )
+            if q in self._inverted_index:
+                doc_ids, q_freq = self._inverted_index[q]
+                idf = self.idf.get(q, 0.0)
+                if idf != 0 and self._doc_len_norm is not None:
+                    denom = q_freq + self._doc_len_norm[doc_ids]
+                    score[doc_ids] += idf * (q_freq * (self.k1 + 1)) / denom
         return score.tolist()
 
-    def _get_batch_scores(self, query: List[str], doc_ids: List[int]) -> List[float]:
+    def _get_batch_scores(self, query: list[str], doc_ids: list[int]) -> list[float]:
         r"""Calculate the BM25 score for the query and the documents in the corpus
 
         Args:
@@ -275,21 +310,27 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             doc_ids: List[int]: The list of document indexes to calculate the score
         """
         assert all(di < len(self.t2d) for di in doc_ids)
+        if self._inverted_index is None and self.indexed:
+            self._build_inverted_index()
+
+        doc_ids_arr = np.array(doc_ids, dtype=np.int32)
         score = np.zeros(len(doc_ids))
-        doc_len = np.array(self.doc_len)[doc_ids]
         for q in query:
-            q_freq = np.array([(self.t2d[di].get(q) or 0) for di in doc_ids])
-            score += (self.idf.get(q) or 0) * (
-                q_freq
-                * (self.k1 + 1)
-                / (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl))
-            )
+            idf = self.idf.get(q, 0.0)
+            if idf != 0 and self._inverted_index and q in self._inverted_index and self._doc_len_norm is not None:
+                q_freq = np.array([self.t2d[di].get(q, 0) for di in doc_ids], dtype=np.float64)
+                denom = q_freq + self._doc_len_norm[doc_ids_arr]
+                nonzero_mask = q_freq > 0
+                if np.any(nonzero_mask):
+                    score[nonzero_mask] += idf * (
+                        q_freq[nonzero_mask] * (self.k1 + 1)
+                    ) / denom[nonzero_mask]
         return score.tolist()
 
     def build_index_from_documents(
         self,
         documents: RetrieverDocumentsType,
-        document_map_func: Optional[Callable[[Any], str]] = None,
+        document_map_func: Callable[[Any], str] | None = None,
         **kwargs,
     ):
         r"""Built index from the `text` field of each document in the list of documents"""
@@ -312,7 +353,7 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
         self.indexed = True
 
     def call(
-        self, input: RetrieverStrQueriesType, top_k: Optional[int] = None, **kwargs
+        self, input: RetrieverStrQueriesType, top_k: int | None = None, **kwargs
     ) -> RetrieverOutputType:
         """
         Retrieve the top n documents for the query and return only the indexes of the documents.
@@ -358,15 +399,26 @@ class BM25Retriever(Retriever[str, RetrieverStrQueryType]):
             raise e
 
     @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BM25Retriever":
+        instance = super().from_dict(data)
+        Component.__init__(instance)
+        instance.reset_index()
+        for key, value in data.get("data", {}).items():
+            setattr(instance, key, cls._restore_value(value))
+        return instance
+
+    @classmethod
     def load_from_file(cls, path: str):
         # create an instance of the class
         try:
-            index_dict = load_json(path)
+            index_dict = load_standard_json(path)
             instance = cls.from_dict(index_dict)
+            use_tok = getattr(instance, "use_tokenizer", getattr(instance, "_use_tokenizer", True))
+            instance._use_tokenizer = use_tok
             # add the split function
             instance._split_function = (
                 split_text_by_word_fn_then_lower_tokenized
-                if instance._use_tokenizer
+                if use_tok
                 else split_text_by_word_fn
             )
             return instance
