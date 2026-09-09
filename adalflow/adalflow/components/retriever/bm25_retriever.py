@@ -6,7 +6,7 @@ import heapq
 import math
 import logging
 
-from adalflow.core.tokenizer import Tokenizer
+from adalflow.core.tokenizer import get_default_tokenizer
 from adalflow.core.types import (
     RetrieverOutput,
     RetrieverOutputType,
@@ -33,26 +33,17 @@ def split_text_by_word_fn(x: str) -> List[str]:
 
 
 def split_text_by_word_fn_then_lower_tokenized(x: str) -> List[str]:
-    tokenizer = Tokenizer()
+    tokenizer = get_default_tokenizer()
     words = x.lower().split(" ")
-    tokens = [tokenizer.encode(word) for word in words]
     final_tokens: List[str] = []
-    for token_list in tokens:
-        for token in token_list:
-            final_tokens.append(tokenizer.decode([token]))
+    for word in words:
+        final_tokens.extend(tokenizer.get_string_tokens(word))
     return final_tokens
 
 
 def split_text_tokenized(x: str) -> List[str]:
-    tokenizer = Tokenizer()
-    # words = x.lower().split(" ")
-    tokens = tokenizer.encode(x)
-    # print(tokens)
-    final_tokens: List[str] = []
-    for token in tokens:
-        final_tokens.append(tokenizer.decode([token]))
-    # print(final_tokens)
-    return final_tokens
+    tokenizer = get_default_tokenizer()
+    return tokenizer.get_string_tokens(x)
 
 
 class BM25Retriever(Retriever[str, RetrieverStrQueryType]):

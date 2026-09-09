@@ -35,7 +35,7 @@ import json
 from collections.abc import AsyncIterable
 
 from adalflow.core.base_data_class import DataClass, required_field
-from adalflow.core.tokenizer import Tokenizer
+from adalflow.core.tokenizer import Tokenizer, get_default_tokenizer
 from adalflow.core.functional import (
     is_normalized,
     generate_function_call_expression_from_callable,
@@ -924,8 +924,7 @@ class Document(DataClass):
 
     def __post_init__(self):
         if self.estimated_num_tokens is None and self.text:
-            tokenizer = Tokenizer()
-            self.estimated_num_tokens = tokenizer.count_tokens(self.text)
+            self.estimated_num_tokens = get_default_tokenizer().count_tokens(self.text)
 
     @classmethod
     def from_dict(cls, doc: Dict):
@@ -946,8 +945,7 @@ class Document(DataClass):
         assert "meta_data" in doc, "meta_data is required"
         assert "text" in doc, "text is required"
         if "estimated_num_tokens" not in doc:
-            tokenizer = Tokenizer()
-            doc["estimated_num_tokens"] = tokenizer.count_tokens(doc["text"])
+            doc["estimated_num_tokens"] = get_default_tokenizer().count_tokens(doc["text"])
         if "id" not in doc or not doc["id"]:
             doc["id"] = uuid.uuid4()
 
