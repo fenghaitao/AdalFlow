@@ -3,7 +3,7 @@ Tokenizer from tiktoken.
 """
 
 import tiktoken
-from typing import List
+from typing import List, Optional
 
 # from adalflow.core.component import BaseComponent
 
@@ -54,3 +54,14 @@ class Tokenizer:
         r"""Returns the string tokens from the input text."""
         token_ids = self.encode(text)
         return [self.tokenizer.decode([token_id]) for token_id in token_ids]
+
+
+_default_tokenizer: Optional[Tokenizer] = None
+
+
+def get_default_tokenizer() -> Tokenizer:
+    r"""Returns a lazily instantiated singleton default Tokenizer instance."""
+    global _default_tokenizer
+    if _default_tokenizer is None:
+        _default_tokenizer = Tokenizer()
+    return _default_tokenizer
