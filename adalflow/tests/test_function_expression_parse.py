@@ -178,6 +178,16 @@ class TestAstEvaluation:
         result = evaluate_ast_node(node, self.context_map)
         assert result == 10
 
+    def test_evaluate_containers_with_variables(self):
+        node = ast.parse("[x, {'a': y, 'b': (x, y)}]", mode="eval").body
+        result = evaluate_ast_node(node, self.context_map)
+        assert result == [10, {"a": 5, "b": (10, 5)}]
+
+    def test_evaluate_set_with_variables(self):
+        node = ast.parse("{x, y, 15}", mode="eval").body
+        result = evaluate_ast_node(node, self.context_map)
+        assert result == {10, 5, 15}
+
 
 if __name__ == "__main__":
     pytest.main()
