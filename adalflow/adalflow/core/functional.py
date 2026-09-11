@@ -28,6 +28,7 @@ import ast
 import threading
 import base64
 
+import inspect
 from inspect import signature, Parameter
 from dataclasses import fields, is_dataclass, MISSING, Field
 
@@ -573,9 +574,15 @@ def convert_schema_to_signature(schema: Dict[str, Dict[str, Any]]) -> Dict[str, 
 # For FunctionTool component
 # It uses get_type_schema and get_dataclass_schema to generate the schema of arguments.
 ########################################################################################
-def get_fun_schema(name: str, func: Callable[..., object]) -> Dict[str, object]:
+def get_fun_schema(
+    name: str,
+    func: Callable[..., object],
+    sig: Optional[inspect.Signature] = None,
+) -> Dict[str, object]:
     r"""Get the schema of a function.
     Support dataclass, Union and normal data types such as int, str, float, etc, list, dict, set.
+
+    Optional `sig` parameter allows passing a pre-computed Signature object to avoid redundant inspection.
 
     Examples:
     def example_function(x: int, y: str = "default") -> int:
@@ -599,7 +606,8 @@ def get_fun_schema(name: str, func: Callable[..., object]) -> Dict[str, object]:
         ]
     }
     """
-    sig = signature(func)
+    if sig is None:
+        sig = signature(func)
     schema = {"type": "object", "properties": {}, "required": []}
     type_hints = get_type_hints(func)
 
@@ -643,13 +651,15 @@ def evaluate_ast_node(node: ast.AST, context_map: Dict[str, Any] = None):
         return node.value
     elif isinstance(node, ast.Dict):
         return {
-            evaluate_ast_node(k): evaluate_ast_node(v)
+            evaluate_ast_node(k, context_map): evaluate_ast_node(v, context_map)
             for k, v in zip(node.keys, node.values)
         }
     elif isinstance(node, ast.List):
-        return [evaluate_ast_node(elem) for elem in node.elts]
+        return [evaluate_ast_node(elem, context_map) for elem in node.elts]
     elif isinstance(node, ast.Tuple):
-        return tuple(evaluate_ast_node(elem) for elem in node.elts)
+        return tuple(evaluate_ast_node(elem, context_map) for elem in node.elts)
+    elif isinstance(node, ast.Set):
+        return {evaluate_ast_node(elem, context_map) for elem in node.elts}
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         return -evaluate_ast_node(node.operand, context_map)  # unary minus
     elif isinstance(
