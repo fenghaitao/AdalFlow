@@ -149,32 +149,27 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
-        # 1. filter out the prompt/template objects from kwargs to avoid circular references
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
-        }
-
         if isinstance(value, Prompt):
-            output =  value.call(**filtered_kwargs)
+            output = value.call(**kwargs)
             return output
 
         if isinstance(value, Template):
-            output = value.render(**filtered_kwargs)
+            output = value.render(**kwargs)
             return output
 
         # if isinstance(value, str) and ("{{" in value or "{%" in value):
         #     # Treat raw strings as one‑off templates
         #     try:
         #         tpl = get_jinja2_environment().from_string(value)
-        #         return tpl.render(**filtered_kwargs)
+        #         return tpl.render(**kwargs)
         #     except UndefinedError:
         #         # leave unresolved – outer template may supply the missing vars
         #         return value
         # if isinstance(value, list):
-        #     return [self._deep_render(v, filtered_kwargs) for v in value]
+        #     return [self._deep_render(v, kwargs) for v in value]
 
         # if isinstance(value, dict):
-        #     return {k: self._deep_render(v, filtered_kwargs) for k, v in value.items()}
+        #     return {k: self._deep_render(v, kwargs) for k, v in value.items()}
 
         return value
 
@@ -250,10 +245,16 @@ class Prompt(DataComponent):
                 prompt_kwargs_str[key] = p
 
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
+        # Pre-filter context once to remove Prompt and Template objects before deep rendering
+        # to prevent circular references and avoid O(N^2) dict filtering inside _deep_render.
+        from jinja2 import Template
+
         context_for_render = prompt_kwargs_str.copy()
+        filtered_context = {
+            k: v for k, v in context_for_render.items() if not isinstance(v, (Prompt, Template))
+        }
         for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+            prompt_kwargs_str[k] = self._deep_render(v, filtered_context)
 
         return prompt_kwargs_str
 

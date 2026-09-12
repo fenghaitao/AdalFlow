@@ -1,0 +1,3 @@
+## 2025-05-18 - Early return in `Prompt._deep_render` to avoid quadratic context filtering
+**Learning:** `Prompt._deep_render` was unconditionally constructing a filtered dictionary of kwargs via dictionary comprehension on every item in `prompt_kwargs_str`. For $N$ kwargs, this created $N$ temporary dictionary copies and caused $O(N^2)$ quadratic complexity. Since non-Prompt/Template values represent over 99% of prompt arguments, adding an early return check `if not isinstance(value, (Prompt, Template)): return value` avoids unnecessary dictionary filtering.
+**Action:** Always check instance types or cheap guard clauses before running dictionary filtering/copying loops over context arguments.
