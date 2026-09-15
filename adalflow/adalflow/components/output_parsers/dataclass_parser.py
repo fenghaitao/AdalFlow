@@ -1,15 +1,18 @@
 """DataClassParser will help users interact with LLMs even better than JsonOutputParser and YamlOutputParser with DataClass."""
 
-from dataclasses import is_dataclass
-from typing import Any, Literal, List, Optional
 import logging
+from dataclasses import is_dataclass
+from typing import Any, List, Literal, Optional
 
-from adalflow.core.prompt_builder import Prompt
+from adalflow.core.base_data_class import (
+    DataClass,
+    DataClassFormatType,
+    ExcludeType,
+    IncludeType,
+)
 from adalflow.core.component import DataComponent
-from adalflow.core.string_parser import YamlParser, JsonParser
-from adalflow.core.base_data_class import DataClass, DataClassFormatType
-from adalflow.core.base_data_class import ExcludeType, IncludeType
-
+from adalflow.core.prompt_builder import Prompt
+from adalflow.core.string_parser import JsonParser, YamlParser
 
 __all__ = ["DataClassParser"]
 
@@ -116,11 +119,13 @@ class DataClassParser(DataComponent):
         self._format_type = format_type
         self._data_class: DataClass = data_class
         self._output_processor = YamlParser() if format_type == "yaml" else JsonParser()
+        # Pre-instantiate prompt templates during __init__ to avoid redundant object creation and template compilation
         self.output_format_prompt = (
             Prompt(template=YAML_OUTPUT_FORMAT)
             if format_type == "yaml"
             else Prompt(template=JSON_OUTPUT_FORMAT)
         )
+        self.examples_prompt = Prompt(template=EXAMPLES_FORMAT)
 
     def get_input_format_str(self) -> str:
         r"""Return the formatted instructions to use in prompt for the input format."""
@@ -131,14 +136,11 @@ class DataClassParser(DataComponent):
 
     def get_output_format_str(self) -> str:
         r"""Return the formatted instructions to use in prompt for the output format."""
-        output_format_str = None
         if self._format_type == "yaml":
             schema = self._data_class.to_yaml_signature(include=self._output_fields)
-            output_format_str = Prompt(template=YAML_OUTPUT_FORMAT)(schema=schema)
         else:
             schema = self._data_class.to_json_signature(include=self._output_fields)
-            output_format_str = Prompt(template=JSON_OUTPUT_FORMAT)(schema=schema)
-        return output_format_str
+        return self.output_format_prompt(schema=schema)
 
     def get_input_str(self, input: DataClass) -> str:
         r"""Return the formatted input string."""
@@ -174,7 +176,7 @@ class DataClassParser(DataComponent):
                 )
                 str_examples.append(per_example_str)
 
-        examples_str = Prompt(template=EXAMPLES_FORMAT)(examples=str_examples)
+        examples_str = self.examples_prompt(examples=str_examples)
         return examples_str
 
     def call(self, input: str) -> Any:
