@@ -149,6 +149,10 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
+        # Short-circuit if value is not a Prompt or Template object
+        if not isinstance(value, (Prompt, Template)):
+            return value
+
         # 1. filter out the prompt/template objects from kwargs to avoid circular references
         filtered_kwargs = {
             k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
