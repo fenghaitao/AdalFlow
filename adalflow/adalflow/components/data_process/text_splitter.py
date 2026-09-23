@@ -280,21 +280,51 @@ class TextSplitter(DataComponent):
                     log.error(f"Text should not be None. Doc id: {doc.id}")
                     raise ValueError(f"Text should not be None. Doc id: {doc.id}")
 
-                text_splits = self.split_text(doc.text)
                 meta_data = deepcopy(doc.meta_data)
 
-                split_docs.extend(
-                    [
-                        Document(
-                            text=txt,
-                            meta_data=meta_data,
-                            parent_doc_id=f"{doc.id}",
-                            order=i,
-                            vector=[],
+                if self.split_by == "token":
+                    separator = self.separators[self.split_by]
+                    splits = self._split_text_into_units(doc.text, separator)
+                    step = self.chunk_size - self.chunk_overlap
+                    tok_chunks = []
+                    idx = 0
+                    for idx in range(0, len(splits), step):
+                        if idx + self.chunk_size >= len(splits):
+                            break
+                        tok_chunks.append(splits[idx : idx + self.chunk_size])
+
+                    if idx < len(splits):
+                        last_chunk = splits[idx:]
+                        if len(last_chunk) > 0:
+                            tok_chunks.append(last_chunk)
+
+                    for i, tok_chunk in enumerate(tok_chunks):
+                        txt = self.tokenizer.decode(tok_chunk)
+                        # Pass estimated_num_tokens directly to avoid redundant tiktoken re-encoding in Document.__post_init__
+                        split_docs.append(
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                                estimated_num_tokens=len(tok_chunk),
+                            )
                         )
-                        for i, txt in enumerate(text_splits)
-                    ]
-                )
+                else:
+                    text_splits = self.split_text(doc.text)
+                    split_docs.extend(
+                        [
+                            Document(
+                                text=txt,
+                                meta_data=meta_data,
+                                parent_doc_id=f"{doc.id}",
+                                order=i,
+                                vector=[],
+                            )
+                            for i, txt in enumerate(text_splits)
+                        ]
+                    )
         log.info(
             f"Processed {len(documents)} documents into {len(split_docs)} split documents."
         )
@@ -303,7 +333,7 @@ class TextSplitter(DataComponent):
     def _split_text_into_units(self, text: str, separator: str) -> List[str]:
         """Split text based on the specified separator."""
         if self.split_by == "token":
-            splits = TextSplitter.tokenizer.encode(text)
+            splits = self.tokenizer.encode(text)
         else:
             splits = text.split(separator)
         log.info(f"Text split by '{separator}' into {len(splits)} parts.")
@@ -346,7 +376,7 @@ class TextSplitter(DataComponent):
 
         if self.split_by == "token":
             # decode each chunk here
-            chunks = [TextSplitter.tokenizer.decode(chunk) for chunk in chunks]
+            chunks = [self.tokenizer.decode(chunk) for chunk in chunks]
 
         log.info(f"Merged into {len(chunks)} chunks.")
         return chunks
