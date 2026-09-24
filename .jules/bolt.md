@@ -1,0 +1,3 @@
+## 2025-05-18 - Avoid O(N^2) dictionary filtering inside Prompt._deep_render
+**Learning:** `Prompt._deep_render` previously created a filtered dictionary of keyword arguments (`filtered_kwargs`) on every single call, even for primitive values. Pre-filtering `context_for_render` once prior to rendering and returning early for standard non-Prompt/non-Template types avoids redundant O(N^2) dictionary allocations without affecting nested rendering.
+**Action:** When performing deep rendering or kwarg processing in prompt builders, pre-filter context dictionaries once before iteration and use fast type checks for early returns.
