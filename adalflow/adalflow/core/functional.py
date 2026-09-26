@@ -39,6 +39,19 @@ log = logging.getLogger(__name__)
 ExcludeType = Optional[Dict[str, List[str]]]
 T_co = TypeVar("T_co", covariant=True)
 
+# Pre-compiled regex patterns for string parsing utilities to reduce runtime overhead
+_INT_PATTERN = re.compile(r"\b\d+\b")
+_FLOAT_PATTERN = re.compile(r"\b\d+(\.\d+)?\b")
+_BOOL_PATTERN = re.compile(r"\b(?:true|false|True|False)\b")
+_MALFORMED_JSON_PATTERN = re.compile(r"^(.*?)\n?```\}*$", re.MULTILINE | re.DOTALL)
+_JSON_MARKDOWN_PATTERN = re.compile(
+    r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
+)
+_YAML_RE_PATTERN = re.compile(
+    r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
+)
+_FIX_COMMAS_PATTERN = re.compile(r'(?<=[}\]"\'\d])(\s+)(?=[\{"\[])')
+
 
 ########################################################################################
 # For Dataclass base class and all schema related functions
@@ -962,7 +975,7 @@ def extract_first_int(text: str) -> int:
     Raises:
         ValueError: If no integer is found in the text.
     """
-    match = re.search(r"\b\d+\b", text)
+    match = _INT_PATTERN.search(text)
     if match:
         return int(match.group())
     raise ValueError("No integer found in the text.")
@@ -980,7 +993,7 @@ def extract_first_float(text: str) -> float:
     Raises:
         ValueError: If no float is found in the text.
     """
-    match = re.search(r"\b\d+(\.\d+)?\b", text)
+    match = _FLOAT_PATTERN.search(text)
 
     if match:
         return float(match.group())
@@ -999,7 +1012,7 @@ def extract_first_boolean(text: str) -> bool:
     Raises:
         ValueError: If no boolean is found in the text.
     """
-    match = re.search(r"\b(?:true|false|True|False)\b", text)
+    match = _BOOL_PATTERN.search(text)
     if match:
         return match.group().lower() == "true"
     raise ValueError("No boolean found in the text.")
@@ -1096,10 +1109,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     
     # First, handle the specific case where JSON ends with ```} or similar patterns
     # This regex will capture JSON that might have trailing markdown artifacts
-    malformed_pattern = re.compile(
-        r'^(.*?)\n?```\}*$', re.MULTILINE | re.DOTALL
-    )
-    malformed_match = malformed_pattern.match(text)
+    malformed_match = _MALFORMED_JSON_PATTERN.match(text)
     if malformed_match and text.endswith('```}'):
         # Extract just the JSON part before the markdown artifacts
         potential_json = malformed_match.group(1).strip()
@@ -1111,10 +1121,7 @@ def extract_json_str(text: str, add_missing_right_brace: bool = True) -> str:
     # Pattern matches ```json, ```JSON, or just ``` at the start
     # IMPORTANT: Only extract if the text STARTS with markdown code blocks to avoid
     # extracting embedded code blocks within JSON string values
-    json_markdown_pattern = re.compile(
-        r"^```(?:json|JSON)?\s*\n?(.*?)```", re.MULTILINE | re.DOTALL
-    )
-    match = json_markdown_pattern.match(text)  # Use match instead of search to ensure it starts at beginning
+    match = _JSON_MARKDOWN_PATTERN.match(text)  # Use match instead of search to ensure it starts at beginning
     if match:
         # Extract the JSON content from within the code blocks
         json_content = match.group(1).strip()
@@ -1230,10 +1237,7 @@ def extract_yaml_str(text: str) -> str:
         ValueError: If no YAML string is found in the text.
     """
     try:
-        yaml_re_pattern: re.Pattern = re.compile(
-            r"^```(?:ya?ml)?(?P<yaml>[^`]*)", re.MULTILINE | re.DOTALL
-        )
-        match = yaml_re_pattern.search(text.strip())
+        match = _YAML_RE_PATTERN.search(text.strip())
 
         yaml_str = ""
         if match:
@@ -1247,11 +1251,8 @@ def extract_yaml_str(text: str) -> str:
 
 def fix_json_missing_commas(json_str: str) -> str:
     # Example: adding missing commas, only after double quotes
-    # Regular expression to find missing commas
-    regex = r'(?<=[}\]"\'\d])(\s+)(?=[\{"\[])'
-
-    # Add commas where missing
-    fixed_json_str = re.sub(regex, r",\1", json_str)
+    # Add commas where missing using pre-compiled regex
+    fixed_json_str = _FIX_COMMAS_PATTERN.sub(r",\1", json_str)
 
     return fixed_json_str
 
