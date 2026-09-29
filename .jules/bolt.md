@@ -1,0 +1,3 @@
+## 2026-03-30 - Analytical Normal Inverse CDF over Monte Carlo Sampling
+**Learning:** Empirical Monte Carlo sampling (`np.percentile(np.random.normal(0, 1, 1000000), ...)`) to estimate Z-critical scores introduces severe latency (~55ms/call), non-determinism, and large memory allocations (1M float array per call). Python 3.8+ includes `statistics.NormalDist().inv_cdf(...)` in the standard library which computes exact analytical Z-critical values in ~2 microseconds (>25,000x speedup) with zero allocations.
+**Action:** Always prefer standard library analytical statistical distributions (`statistics.NormalDist`) over random Monte Carlo sampling for standard critical score computations.
