@@ -1,10 +1,10 @@
 import unittest
-from adalflow.core.types import Document
+
 from adalflow.components.data_process.text_splitter import TextSplitter
+from adalflow.core.types import Document
 
 
 class TestTextSplitter(unittest.TestCase):
-
     def setUp(self):
         # Set up a TextSplitter instance before each test
         self.splitter = TextSplitter(split_by="word", chunk_size=5, chunk_overlap=2)
@@ -63,6 +63,31 @@ class TestTextSplitter(unittest.TestCase):
         # Test handling of empty text
         with self.assertRaises(ValueError):
             self.splitter.call([Document(text=None, id="1")])
+
+    def test_split_by_token(self):
+        # Test splitting by token
+        token_splitter = TextSplitter(split_by="token", chunk_size=10, chunk_overlap=2)
+        text = "The quick brown fox jumps over the lazy dog repeatedly until dusk."
+        chunks = token_splitter.split_text(text)
+        self.assertGreater(len(chunks), 1)
+
+    def test_document_splitting_by_token(self):
+        # Test document splitting by token preserves estimated_num_tokens and doc attributes
+        token_splitter = TextSplitter(split_by="token", chunk_size=10, chunk_overlap=2)
+        doc = Document(
+            text="The quick brown fox jumps over the lazy dog repeatedly until dusk.",
+            id="doc_token_1",
+            meta_data={"author": "test"},
+        )
+        split_docs = token_splitter.call([doc])
+        self.assertGreater(len(split_docs), 1)
+
+        for i, split_doc in enumerate(split_docs):
+            self.assertEqual(split_doc.parent_doc_id, "doc_token_1")
+            self.assertEqual(split_doc.order, i)
+            self.assertEqual(split_doc.meta_data, {"author": "test"})
+            self.assertIsNotNone(split_doc.estimated_num_tokens)
+            self.assertGreater(split_doc.estimated_num_tokens, 0)
 
 
 if __name__ == "__main__":
