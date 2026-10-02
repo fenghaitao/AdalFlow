@@ -13,22 +13,23 @@ However, the following approaches are commonly shared:
 * **Retrieval:** Leverage vectors for context retrieval.
 """
 
-from copy import deepcopy
-from typing import List, Literal, Optional
-from tqdm import tqdm
 import logging
+from copy import deepcopy
+from typing import Literal
+
+from tqdm import tqdm
 
 from adalflow.core.component import DataComponent
-from adalflow.core.types import Document
 from adalflow.core.tokenizer import Tokenizer
+from adalflow.core.types import Document
 
 # TODO:
 # More splitters such as PDF/JSON/HTML Splitter can be built on TextSplitter.
 
 log = logging.getLogger(__name__)
 
-DocumentSplitterInputType = List[Document]
-DocumentSplitterOutputType = List[Document]
+DocumentSplitterInputType = list[Document]
+DocumentSplitterOutputType = list[Document]
 
 # customizable seperators map
 SEPARATORS = {
@@ -162,7 +163,7 @@ class TextSplitter(DataComponent):
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         batch_size: int = 1000,
-        separators: Optional[dict] = SEPARATORS,
+        separators: dict | None = SEPARATORS,
     ):
         """
         Initializes the TextSplitter with the specified parameters for text splitting.
@@ -211,7 +212,45 @@ class TextSplitter(DataComponent):
             f"Initialized TextSplitter with split_by={self.split_by}, chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}, batch_size={self.batch_size}"
         )
 
-    def split_text(self, text: str) -> List[str]:
+    def _split_text_with_token_counts(self, text: str) -> list[tuple[str, int | None]]:
+        """
+        Splits text into chunks and returns pairs of (chunk_text, token_count).
+
+        When split_by is 'token', token counts are known directly from the sliced token lists,
+        avoiding redundant tiktoken re-encodings during Document instantiation.
+        """
+        separator = self.separators[self.split_by]
+        splits = self._split_text_into_units(text, separator)
+        log.info(f"Text split into {len(splits)} parts.")
+
+        if self.split_by == "token":
+            # splits is a list of token IDs; calculate token counts directly per slice
+            step = self.chunk_size - self.chunk_overlap
+            chunks_with_counts = []
+            idx = 0
+            for idx in range(0, len(splits), step):
+                if idx + self.chunk_size >= len(splits):
+                    break
+                current_splits = splits[idx : idx + self.chunk_size]
+                chunk_txt = TextSplitter.tokenizer.decode(current_splits)
+                chunks_with_counts.append((chunk_txt, len(current_splits)))
+
+            if idx < len(splits):
+                last_splits = splits[idx:]
+                if len(last_splits) > 0:
+                    chunk_txt = TextSplitter.tokenizer.decode(last_splits)
+                    chunks_with_counts.append((chunk_txt, len(last_splits)))
+
+            log.info(f"Text merged into {len(chunks_with_counts)} chunks.")
+            return chunks_with_counts
+        else:
+            chunks = self._merge_units_to_chunks(
+                splits, self.chunk_size, self.chunk_overlap, separator
+            )
+            log.info(f"Text merged into {len(chunks)} chunks.")
+            return [(chunk, None) for chunk in chunks]
+
+    def split_text(self, text: str) -> list[str]:
         """
         Splits the provided text into chunks.
 
@@ -226,14 +265,8 @@ class TextSplitter(DataComponent):
         log.info(
             f"Splitting text with split_by: {self.split_by}, chunk_size: {self.chunk_size}, chunk_overlap: {self.chunk_overlap}"
         )
-        separator = self.separators[self.split_by]
-        splits = self._split_text_into_units(text, separator)
-        log.info(f"Text split into {len(splits)} parts.")
-        chunks = self._merge_units_to_chunks(
-            splits, self.chunk_size, self.chunk_overlap, separator
-        )
-        log.info(f"Text merged into {len(chunks)} chunks.")
-        return chunks
+        chunks_with_counts = self._split_text_with_token_counts(text)
+        return [chunk for chunk, _ in chunks_with_counts]
 
     def call(self, documents: DocumentSplitterInputType) -> DocumentSplitterOutputType:
         """
@@ -280,19 +313,23 @@ class TextSplitter(DataComponent):
                     log.error(f"Text should not be None. Doc id: {doc.id}")
                     raise ValueError(f"Text should not be None. Doc id: {doc.id}")
 
-                text_splits = self.split_text(doc.text)
-                meta_data = deepcopy(doc.meta_data)
+                chunks_with_counts = self._split_text_with_token_counts(doc.text)
+                meta_data = (
+                    deepcopy(doc.meta_data) if doc.meta_data is not None else None
+                )
+                parent_doc_id = f"{doc.id}"
 
                 split_docs.extend(
                     [
                         Document(
                             text=txt,
                             meta_data=meta_data,
-                            parent_doc_id=f"{doc.id}",
+                            parent_doc_id=parent_doc_id,
                             order=i,
                             vector=[],
+                            estimated_num_tokens=count,
                         )
-                        for i, txt in enumerate(text_splits)
+                        for i, (txt, count) in enumerate(chunks_with_counts)
                     ]
                 )
         log.info(
@@ -300,7 +337,7 @@ class TextSplitter(DataComponent):
         )
         return split_docs
 
-    def _split_text_into_units(self, text: str, separator: str) -> List[str]:
+    def _split_text_into_units(self, text: str, separator: str) -> list[str]:
         """Split text based on the specified separator."""
         if self.split_by == "token":
             splits = TextSplitter.tokenizer.encode(text)
@@ -310,8 +347,8 @@ class TextSplitter(DataComponent):
         return splits
 
     def _merge_units_to_chunks(
-        self, splits: List[str], chunk_size: int, chunk_overlap: int, separator: str
-    ) -> List[str]:
+        self, splits: list[str], chunk_size: int, chunk_overlap: int, separator: str
+    ) -> list[str]:
         """
         Merge split text chunks based on the specified chunk size and overlap.
         """
