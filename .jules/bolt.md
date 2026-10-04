@@ -1,0 +1,3 @@
+## 2025-05-20 - Fast text normalization with str.translate
+**Learning:** Python string generator expressions with set lookups (e.g. `"".join(ch for ch in text if ch not in exclude_set)`) inside text processing hot-paths create significant function and tuple/generator frame overhead. Using C-implemented `str.translate` with a pre-computed `str.maketrans` table and pre-compiled regex objects avoids Python-level loop overhead and reduces execution time.
+**Action:** When normalizing text or stripping sets of characters, prefer `str.translate(_PUNC_TABLE)` over custom generator joins or inner loop filtering.
