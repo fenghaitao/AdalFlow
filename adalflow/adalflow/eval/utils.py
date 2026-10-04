@@ -5,22 +5,22 @@ import string
 from collections import Counter
 
 
-def normalize_answer(s):
+# Pre-compile regex and build translation table for high performance
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b")
+_PUNC_TABLE = str.maketrans("", "", string.punctuation)
 
-    def remove_articles(text):
-        return re.sub(r"\b(a|an|the)\b", " ", text)
 
-    def white_space_fix(text):
-        return " ".join(text.split())
+def normalize_answer(s: str) -> str:
+    """Normalize text by converting to lower case, removing punctuation, articles, and extra whitespace.
 
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
-
-    def lower(text):
-        return text.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(s))))
+    Optimized by using module-level pre-compiled regex and str.translate for punctuation removal.
+    """
+    # 1. Lowercase and remove punctuation via fast C-implemented translate table
+    s = s.lower().translate(_PUNC_TABLE)
+    # 2. Remove articles 'a', 'an', 'the' using pre-compiled regex
+    s = _ARTICLES_RE.sub(" ", s)
+    # 3. Collapse multiple whitespace characters
+    return " ".join(s.split())
 
 
 def f1_score(y: str, y_gt: str) -> float:
