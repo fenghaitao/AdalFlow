@@ -121,6 +121,8 @@ class DataClassParser(DataComponent):
             if format_type == "yaml"
             else Prompt(template=JSON_OUTPUT_FORMAT)
         )
+        # Pre-instantiate examples prompt to avoid re-parsing Jinja templates on every call
+        self.examples_prompt = Prompt(template=EXAMPLES_FORMAT)
 
     def get_input_format_str(self) -> str:
         r"""Return the formatted instructions to use in prompt for the input format."""
@@ -132,12 +134,13 @@ class DataClassParser(DataComponent):
     def get_output_format_str(self) -> str:
         r"""Return the formatted instructions to use in prompt for the output format."""
         output_format_str = None
+        # Reuse pre-instantiated self.output_format_prompt to avoid Jinja template compilation overhead
         if self._format_type == "yaml":
             schema = self._data_class.to_yaml_signature(include=self._output_fields)
-            output_format_str = Prompt(template=YAML_OUTPUT_FORMAT)(schema=schema)
+            output_format_str = self.output_format_prompt(schema=schema)
         else:
             schema = self._data_class.to_json_signature(include=self._output_fields)
-            output_format_str = Prompt(template=JSON_OUTPUT_FORMAT)(schema=schema)
+            output_format_str = self.output_format_prompt(schema=schema)
         return output_format_str
 
     def get_input_str(self, input: DataClass) -> str:
@@ -174,7 +177,8 @@ class DataClassParser(DataComponent):
                 )
                 str_examples.append(per_example_str)
 
-        examples_str = Prompt(template=EXAMPLES_FORMAT)(examples=str_examples)
+        # Reuse pre-instantiated self.examples_prompt to avoid Jinja template compilation overhead
+        examples_str = self.examples_prompt(examples=str_examples)
         return examples_str
 
     def call(self, input: str) -> Any:
