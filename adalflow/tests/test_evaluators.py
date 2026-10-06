@@ -1,11 +1,13 @@
 import os
+
 import pytest
 
 from adalflow.eval import (
     AnswerMatchAcc,
-    RetrieverEvaluator,
     LLMasJudge,
+    RetrieverEvaluator,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -96,3 +98,30 @@ def test_llm_as_judge():
     )
     assert avg_judgement == 2 / 3
     assert judgement_list == [True, True, False]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower < upper <= 1.0
+    # Expected value check for 95% CI on this input
+    assert pytest.approx(lower, abs=1e-3) == 0.3528
+    assert pytest.approx(upper, abs=1e-3) == 1.0
+
+    # Custom confidence level
+    lower_90, upper_90 = confidence_interval(judgements, confidence=0.90)
+    assert lower_90 > lower  # Narrower CI for lower confidence level
+    assert upper_90 <= upper
+
+    # Input validations
+    with pytest.raises(ValueError, match="judgements must be a list"):
+        confidence_interval("invalid")
+
+    with pytest.raises(ValueError, match="judgements must contain only integers or floats"):
+        confidence_interval([1, "a", 0])
+
+    with pytest.raises(ValueError, match="confidence must be a number"):
+        confidence_interval([1, 0], confidence="high")
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval([1, 0], confidence=1.5)
