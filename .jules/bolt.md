@@ -1,0 +1,3 @@
+## 2025-05-18 - Avoid Monte Carlo sampling when exact distribution functions exist
+**Learning:** `confidence_interval` in `adalflow.eval.functional` was generating 1,000,000 random normal samples via `np.random.normal(0, 1, 1000000)` and computing `np.percentile` to approximate the Z-critical value on every single call (~0.06s per call). Replacing Monte Carlo simulation with exact `statistics.NormalDist().inv_cdf` from standard library achieves exact results in ~0.00009s (>600x speedup) while eliminating 1M array allocations per call.
+**Action:** Look out for empirical random sampling in mathematical/statistical utility functions and replace with closed-form inverse CDF or statistical distribution functions where exact values can be computed directly.
