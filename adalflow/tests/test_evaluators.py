@@ -1,11 +1,13 @@
 import os
+
 import pytest
 
 from adalflow.eval import (
     AnswerMatchAcc,
-    RetrieverEvaluator,
     LLMasJudge,
+    RetrieverEvaluator,
 )
+from adalflow.eval.functional import confidence_interval, longest_common_substring
 
 
 def test_answer_match_acc():
@@ -52,6 +54,33 @@ def test_retriever_recall():
     assert recall_list == [1 / 3, 1.0]
     assert avg_precision == 0.8333333333333333
     assert precision_list == [1.0, 0.6666666666666666]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower <= upper <= 1.0
+    assert abs(lower - 0.3528) < 0.01
+    assert upper == 1.0
+
+    # Input validation tests
+    with pytest.raises(ValueError, match="judgements must be a list"):
+        confidence_interval("not a list")
+
+    with pytest.raises(ValueError, match="judgements must contain only integers or floats"):
+        confidence_interval([1, "a", 0])
+
+    with pytest.raises(ValueError, match="confidence must be a number"):
+        confidence_interval([1, 0], confidence="high")
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval([1, 0], confidence=1.5)
+
+
+def test_longest_common_substring():
+    s1 = "abcdfghijk"
+    s2 = "abedfghxyz"
+    assert longest_common_substring(s1, s2) == "dfgh"
 
 
 # def test_retriever_relevance():
