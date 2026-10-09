@@ -1,26 +1,26 @@
 # from hotpotqa github
 import re
-
 import string
 from collections import Counter
 
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b")
+_PUNC_TABLE = str.maketrans("", "", string.punctuation)
 
-def normalize_answer(s):
 
-    def remove_articles(text):
-        return re.sub(r"\b(a|an|the)\b", " ", text)
+def normalize_answer(s: str) -> str:
+    """Normalize answer string by lowercasing, removing punctuation, removing articles, and fixing whitespace.
 
-    def white_space_fix(text):
-        return " ".join(text.split())
-
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
-
-    def lower(text):
-        return text.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(s))))
+    Optimized with pre-compiled regex and C-level string translation table to avoid inner function
+    re-definitions and generator allocations.
+    """
+    if not isinstance(s, str):
+        s = str(s)
+    # Lowercase and remove punctuation using C-level str.translate
+    s_clean = s.lower().translate(_PUNC_TABLE)
+    # Remove articles ('a', 'an', 'the')
+    s_no_articles = _ARTICLES_RE.sub(" ", s_clean)
+    # Normalize whitespace
+    return " ".join(s_no_articles.split())
 
 
 def f1_score(y: str, y_gt: str) -> float:
