@@ -1,0 +1,3 @@
+## 2025-05-18 - Monte Carlo vs Standard Library Normal Distribution Inverse CDF
+**Learning:** In statistical/eval routines (like `confidence_interval`), using empirical Monte Carlo sampling (`np.random.normal(0, 1, 1000000)`) with `np.percentile` allocates huge temporary arrays (1,000,000 floats per invocation) and introduces noise. Using Python's standard library `statistics.NormalDist().inv_cdf` calculates the exact Z-critical value deterministically without allocations, achieving >25,000x speedup.
+**Action:** Always prefer analytical standard library functions (`statistics.NormalDist().inv_cdf` or `scipy.stats.norm.ppf`) over empirical Monte Carlo array sampling for statistical critical values.

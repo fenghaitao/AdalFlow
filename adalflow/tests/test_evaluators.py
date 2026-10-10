@@ -6,6 +6,7 @@ from adalflow.eval import (
     RetrieverEvaluator,
     LLMasJudge,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -21,6 +22,25 @@ def test_answer_match_acc():
     avg_acc, acc_list = acc.avg_score, acc.per_item_scores
     assert avg_acc == 1.0
     assert acc_list == [1.0, 1.0, 1.0]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0 <= lower < 0.5
+    assert 0.5 < upper <= 1.0
+
+    # Custom confidence
+    lower_96, upper_96 = confidence_interval(judgements, confidence=0.96)
+    assert lower_96 < lower or pytest.approx(lower_96, abs=1e-3) == lower
+
+    # Edge cases / validation errors
+    with pytest.raises(ValueError):
+        confidence_interval("not a list")
+    with pytest.raises(ValueError):
+        confidence_interval([1, "a"])
+    with pytest.raises(ValueError):
+        confidence_interval(judgements, confidence=1.5)
 
 
 def test_retriever_recall():
