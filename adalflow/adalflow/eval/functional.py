@@ -1,10 +1,10 @@
-from typing import List, Tuple
+
 import numpy as np
 
 
 def confidence_interval(
-    judgements: List[float], confidence: float = 0.95
-) -> Tuple[float, float]:
+    judgements: list[float], confidence: float = 0.95
+) -> tuple[float, float]:
     """
     Calculate the confidence interval for a list of binary judgments.
 
@@ -53,33 +53,35 @@ def longest_common_substring(s1: str, s2: str) -> str:
     """
     Find the longest common substring between two strings.
     """
-    # Create a matrix to store lengths of longest common suffixes of substrings
-    # Initialize all values to 0
-    m, n = len(s1), len(s2)
-    lcs_matrix = [[0] * (n + 1) for _ in range(m + 1)]
+    if not s1 or not s2:
+        return ""
+    if s1 == s2:
+        return s1
+    if len(s1) <= len(s2) and s1 in s2:
+        return s1
+    if len(s2) < len(s1) and s2 in s1:
+        return s2
 
-    # Variable to store the length of the longest common substring
+    # Optimize DP space from O(M*N) 2D matrix to O(N) 1D array
+    m, n = len(s1), len(s2)
+    dp = [0] * (n + 1)
+
     longest_length = 0
-    # Variable to store the ending index of the longest common substring in s1
     ending_index_s1 = 0
 
-    # Build the matrix in a bottom-up manner
     for i in range(1, m + 1):
-        for j in range(1, n + 1):
-            if s1[i - 1] == s2[j - 1]:
-                lcs_matrix[i][j] = lcs_matrix[i - 1][j - 1] + 1
-                if lcs_matrix[i][j] > longest_length:
-                    longest_length = lcs_matrix[i][j]
+        ch1 = s1[i - 1]
+        for j in range(n, 0, -1):
+            if ch1 == s2[j - 1]:
+                val = dp[j - 1] + 1
+                dp[j] = val
+                if val > longest_length:
+                    longest_length = val
                     ending_index_s1 = i - 1
             else:
-                lcs_matrix[i][j] = 0
+                dp[j] = 0
 
-    # The longest common substring
-    longest_common_substring = s1[
-        ending_index_s1 - longest_length + 1 : ending_index_s1 + 1
-    ]
-
-    return longest_common_substring
+    return s1[ending_index_s1 - longest_length + 1 : ending_index_s1 + 1]
 
 
 if __name__ == "__main__":

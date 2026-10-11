@@ -1,11 +1,13 @@
 import os
+
 import pytest
 
 from adalflow.eval import (
     AnswerMatchAcc,
-    RetrieverEvaluator,
     LLMasJudge,
+    RetrieverEvaluator,
 )
+from adalflow.eval.functional import longest_common_substring
 
 
 def test_answer_match_acc():
@@ -74,6 +76,16 @@ def test_retriever_recall():
 #     assert 0.8 < avg_relevance < 0.81
 #     assert relevance_list[0] == 1.0
 #     assert 0.6 < relevance_list[1] < 0.61
+
+
+def test_longest_common_substring():
+    assert longest_common_substring("", "") == ""
+    assert longest_common_substring("abc", "") == ""
+    assert longest_common_substring("", "abc") == ""
+    assert longest_common_substring("hello", "hello") == "hello"
+    assert longest_common_substring("abcdef", "cde") == "cde"
+    assert longest_common_substring("cde", "abcdef") == "cde"
+    assert longest_common_substring("abcdfghijk", "abedfghxyz") == "dfgh"
 
 
 # This test is skipped by default. To run this test locally, set the environment variable RUN_LOCAL_TESTS to True (export RUN_LOCAL_TESTS=true).
