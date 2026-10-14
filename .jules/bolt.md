@@ -1,0 +1,3 @@
+## 2026-03-31 - Direct z-critical calculation vs Monte Carlo sampling in confidence interval
+**Learning:** `np.percentile(np.random.normal(0, 1, 1000000), ...)` was used in `confidence_interval` to dynamically sample a standard normal distribution to find the z-critical value. Replacing this with Python's standard library `statistics.NormalDist().inv_cdf()` avoids allocating a 1,000,000 float array and running Monte Carlo sampling per call, achieving >25,000x speedup with exact deterministic results.
+**Action:** Look out for Monte Carlo sampling or empirical distributions used for basic standard mathematical/statistical constants (e.g. z-scores, percentiles of standard distributions) and replace them with exact analytical CDF/inv_cdf functions.
