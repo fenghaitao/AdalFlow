@@ -1,26 +1,18 @@
 # from hotpotqa github
 import re
-
 import string
 from collections import Counter
 
+# Pre-compile regex and translation table at module level for speed
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.UNICODE)
+_PUNC_TABLE = str.maketrans("", "", string.punctuation)
 
-def normalize_answer(s):
 
-    def remove_articles(text):
-        return re.sub(r"\b(a|an|the)\b", " ", text)
-
-    def white_space_fix(text):
-        return " ".join(text.split())
-
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
-
-    def lower(text):
-        return text.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(s))))
+def normalize_answer(s: str) -> str:
+    """Normalize text by lowercasing, removing punctuation/articles, and fixing whitespace."""
+    # Fast path C-level translation for punctuation removal & lowercasing
+    cleaned = _ARTICLES_RE.sub(" ", s.lower().translate(_PUNC_TABLE))
+    return " ".join(cleaned.split())
 
 
 def f1_score(y: str, y_gt: str) -> float:
