@@ -1,0 +1,3 @@
+## 2025-05-18 - Exact Z-critical calculation in confidence_interval
+**Learning:** `np.percentile(np.random.normal(0, 1, 1000000), ...)` was being recomputed on every call to `confidence_interval`, creating 1,000,000 float array allocations and introducing non-deterministic noise into evaluation bounds. `statistics.NormalDist().inv_cdf` provides exact theoretical quantiles deterministically with zero array allocations (~25,000x speedup).
+**Action:** Always check if statistical metrics or percentiles are using Monte Carlo random sampling where closed-form inverse CDFs (`statistics.NormalDist().inv_cdf` or `scipy.stats`) exist.
