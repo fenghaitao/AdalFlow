@@ -1,6 +1,5 @@
 """Retriever Recall @k metric."""
 
-from typing import List, Dict
 
 from adalflow.eval.base import BaseEvaluator, EvaluationResult
 from adalflow.eval.utils import normalize_answer
@@ -51,8 +50,8 @@ class RetrieverEvaluator(BaseEvaluator):
         super().__init__()
 
     def compute_single_item(
-        self, retrieved_context: List[str], gt_context: List[str]
-    ) -> Dict[str, float]:
+        self, retrieved_context: list[str], gt_context: list[str]
+    ) -> dict[str, float]:
         r"""
         Compute the recall of the retrieved context for a single query.
 
@@ -63,27 +62,22 @@ class RetrieverEvaluator(BaseEvaluator):
         Returns:
             float: Recall value.
         """
-        # 1 normalize the text
-        normalized_retrieved_context = [
-            normalize_answer(doc) for doc in retrieved_context
-        ]
+        # 1 normalize text and build sets directly without intermediate lists
+        set_retrieved = {normalize_answer(doc) for doc in retrieved_context}
+        set_gt = {normalize_answer(doc) for doc in gt_context}
 
-        normalized_gt_context = [normalize_answer(doc) for doc in gt_context]
+        # 2 calculate intersection once for both recall and precision
+        intersection_len = len(set_gt & set_retrieved)
 
-        set_retrieved = set(normalized_retrieved_context)
-        set_gt = set(normalized_gt_context)
-
-        # 2 calculate the recall with intersection
-
-        recall = len(set_gt.intersection(set_retrieved)) / len(set_gt)
-        precision = len(set_gt.intersection(set_retrieved)) / len(set_retrieved)
+        recall = intersection_len / len(set_gt) if set_gt else 0.0
+        precision = intersection_len / len(set_retrieved) if set_retrieved else 0.0
 
         return {"recall": recall, "precision": precision}
 
     def compute(
         self,
-        retrieved_contexts: List[List[str]],
-        gt_contexts: List[List[str]],
+        retrieved_contexts: list[list[str]],
+        gt_contexts: list[list[str]],
     ) -> EvaluationResult:
         r"""
         Compute the recall of the retrieved context for a list of queries.
@@ -100,27 +94,23 @@ class RetrieverEvaluator(BaseEvaluator):
             raise ValueError(
                 "The number of retrieved context lists and ground truth context lists should be the same."
             )
-        k = len(retrieved_contexts[0])
-        metric_list = []
+        k = len(retrieved_contexts[0]) if retrieved_contexts else 0
+        recall_list = []
+        precision_list = []
         for retrieved_context, gt_context in zip(retrieved_contexts, gt_contexts):
-
             metric = self.compute_single_item(retrieved_context, gt_context)
-            metric_list.append(metric)
+            recall_list.append(metric["recall"])
+            precision_list.append(metric["precision"])
 
-        # average through each key value
-
-        avg_recall = sum([metric["recall"] for metric in metric_list]) / len(
-            metric_list
-        )
-        avg_precision = sum([metric["precision"] for metric in metric_list]) / len(
-            metric_list
-        )
+        num_items = len(recall_list)
+        avg_recall = sum(recall_list) / num_items if num_items > 0 else 0.0
+        avg_precision = sum(precision_list) / num_items if num_items > 0 else 0.0
 
         return {
             "avg_recall": avg_recall,
             "avg_precision": avg_precision,
-            "recall_list": [metric["recall"] for metric in metric_list],
-            "precision_list": [metric["precision"] for metric in metric_list],
+            "recall_list": recall_list,
+            "precision_list": precision_list,
             "top_k": k,
         }
 
