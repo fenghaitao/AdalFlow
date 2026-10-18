@@ -6,6 +6,7 @@ from adalflow.eval import (
     RetrieverEvaluator,
     LLMasJudge,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -96,3 +97,21 @@ def test_llm_as_judge():
     )
     assert avg_judgement == 2 / 3
     assert judgement_list == [True, True, False]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower <= upper <= 1.0
+    assert pytest.approx(lower, rel=1e-3) == 0.3528
+    assert pytest.approx(upper, rel=1e-3) == 1.0
+
+    # Test error cases
+    with pytest.raises(ValueError):
+        confidence_interval("invalid")
+
+    with pytest.raises(ValueError):
+        confidence_interval([1, "invalid"])
+
+    with pytest.raises(ValueError):
+        confidence_interval(judgements, confidence=1.5)
