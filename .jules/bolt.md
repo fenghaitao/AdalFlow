@@ -1,0 +1,3 @@
+## 2025-05-18 - Analytical Z-Critical Value in Confidence Interval Calculation
+**Learning:** `confidence_interval` in `adalflow/eval/functional.py` was previously using Monte Carlo simulation (`np.percentile(np.random.normal(0, 1, 1000000), ...)`) to calculate standard normal Z-critical values, incurring ~50ms latency and allocating 1M float elements per function call. Python 3.8+ standard library `statistics.NormalDist().inv_cdf` provides exact analytical Z-critical values in <2µs without sampling noise or heavy memory allocation.
+**Action:** Always prefer standard library distribution inverse CDF methods (`statistics.NormalDist().inv_cdf`) over empirical Monte Carlo sampling for standard critical value calculations.
