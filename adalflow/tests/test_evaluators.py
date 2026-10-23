@@ -1,11 +1,13 @@
 import os
+
 import pytest
 
 from adalflow.eval import (
     AnswerMatchAcc,
-    RetrieverEvaluator,
     LLMasJudge,
+    RetrieverEvaluator,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -52,6 +54,28 @@ def test_retriever_recall():
     assert recall_list == [1 / 3, 1.0]
     assert avg_precision == 0.8333333333333333
     assert precision_list == [1.0, 0.6666666666666666]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower <= upper <= 1.0
+    # Expected mean = 5/7 ~= 0.7142857
+    # Expected standard error = std([1,1,0,1,0,1,1], ddof=1) / sqrt(7) ~= 0.48795 / 2.64575 ~= 0.184437
+    # Expected z_critical for 95% = 1.95996
+    # MoE ~= 0.36149
+    # lower_bound = max(0, 0.71428 - 0.36149) ~= 0.35279
+    # upper_bound = min(1, 0.71428 + 0.36149) = 1.0 (clipped)
+    assert round(lower, 4) == 0.3528
+    assert round(upper, 4) == 1.0
+
+    # Test error inputs
+    with pytest.raises(ValueError):
+        confidence_interval("not a list")
+    with pytest.raises(ValueError):
+        confidence_interval([1, "a"])
+    with pytest.raises(ValueError):
+        confidence_interval([1, 0], confidence=1.5)
 
 
 # def test_retriever_relevance():
