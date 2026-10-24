@@ -149,6 +149,10 @@ class Prompt(DataComponent):
         """
         from jinja2 import Template
 
+        # Fast path: return as-is if value is not a Prompt or Template
+        if not isinstance(value, (Prompt, Template)):
+            return value
+
         # 1. filter out the prompt/template objects from kwargs to avoid circular references
         filtered_kwargs = {
             k: v for k, v in kwargs.items() if not isinstance(v, (Prompt, Template))
@@ -250,10 +254,22 @@ class Prompt(DataComponent):
                 prompt_kwargs_str[key] = p
 
         # Pass‑2: recursively render any templates ── new behaviour
-        # Create a copy to avoid circular reference during deep rendering
-        context_for_render = prompt_kwargs_str.copy()
-        for k, v in list(prompt_kwargs_str.items()):
-            prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
+        # Check if any value is a Prompt or Template to avoid unnecessary dictionary copies and filtering
+        from jinja2 import Template
+
+        has_templates = any(
+            isinstance(v, (Prompt, Template)) for v in prompt_kwargs_str.values()
+        )
+        if has_templates:
+            # Pre-filter context once to exclude Prompt/Template objects to avoid circular reference during deep rendering
+            context_for_render = {
+                k: v
+                for k, v in prompt_kwargs_str.items()
+                if not isinstance(v, (Prompt, Template))
+            }
+            for k, v in list(prompt_kwargs_str.items()):
+                if isinstance(v, (Prompt, Template)):
+                    prompt_kwargs_str[k] = self._deep_render(v, context_for_render)
 
         return prompt_kwargs_str
 
