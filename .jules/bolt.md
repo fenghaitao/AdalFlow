@@ -1,0 +1,3 @@
+## 2025-05-18 - Prompt Keyword Render O(N^2) Bottleneck
+**Learning:** `Prompt._convert_prompt_kwargs_to_str` called `_deep_render` on every keyword argument, which re-filtered the entire kwargs dictionary $N$ times. For prompts rendered with many keyword arguments, this created $O(N^2)$ dictionary allocation overhead on every prompt call.
+**Action:** Pre-check if any keyword argument value is a `Prompt` or `Template` instance using `any(isinstance(v, (Prompt, Template)) ...)`. If none exist, bypass Pass-2 entirely; if templates exist, filter the context dictionary once before deep rendering nested templates.
