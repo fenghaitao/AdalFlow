@@ -1,0 +1,3 @@
+## 2025-02-18 - Avoid Monte Carlo standard normal sampling for critical values
+**Learning:** Monte Carlo random sampling (`np.percentile(np.random.normal(0, 1, 1000000), ...)`) was being used per-call to compute normal distribution z-critical values in evaluation functions. Replacing this with standard library `statistics.NormalDist().inv_cdf(p)` achieves exact theoretical results with >25,000x speedup and zero array allocations.
+**Action:** Use standard mathematical functions (`statistics.NormalDist().inv_cdf` or `scipy.stats.norm.ppf`) instead of empirical random sampling when calculating critical values or standard statistical bounds.
