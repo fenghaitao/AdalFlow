@@ -28,7 +28,7 @@ import ast
 import threading
 import base64
 
-from inspect import signature, Parameter
+from inspect import signature, Parameter, Signature
 from dataclasses import fields, is_dataclass, MISSING, Field
 
 from pydantic import BaseModel
@@ -573,7 +573,11 @@ def convert_schema_to_signature(schema: Dict[str, Dict[str, Any]]) -> Dict[str, 
 # For FunctionTool component
 # It uses get_type_schema and get_dataclass_schema to generate the schema of arguments.
 ########################################################################################
-def get_fun_schema(name: str, func: Callable[..., object]) -> Dict[str, object]:
+def get_fun_schema(
+    name: str,
+    func: Callable[..., object],
+    sig: Optional[Signature] = None,
+) -> Dict[str, object]:
     r"""Get the schema of a function.
     Support dataclass, Union and normal data types such as int, str, float, etc, list, dict, set.
 
@@ -599,7 +603,7 @@ def get_fun_schema(name: str, func: Callable[..., object]) -> Dict[str, object]:
         ]
     }
     """
-    sig = signature(func)
+    sig = sig or signature(func)
     schema = {"type": "object", "properties": {}, "required": []}
     type_hints = get_type_hints(func)
 

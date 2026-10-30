@@ -237,7 +237,8 @@ class FunctionTool(Component):
     ) -> FunctionDefinition:
         name = fn.fun_name
         docstring = fn.doc_string
-        signature_str = str(signature(fn.fun))
+        sig = signature(fn.fun)
+        signature_str = str(sig)
         cls_name = None
         if ismethod(fn.fun):
             cls_name = fn.fun.__self__.__class__.__name__
@@ -250,7 +251,7 @@ class FunctionTool(Component):
                 if isinstance(docstring, str)
                 else f"{name}{signature_str}\nDocstring:{docstring.data}"
             ),
-            func_parameters=get_fun_schema(name, fn.fun),
+            func_parameters=get_fun_schema(name, fn.fun, sig=sig),
         )
 
     def _autodetect_class_instance(self, fn: Callable) -> Optional[Any]:
@@ -262,7 +263,8 @@ class FunctionTool(Component):
 
         name = self.fn.__name__
         docstring = self.fn.__doc__
-        signature_str = str(signature(self.fn))
+        sig = signature(self.fn)
+        signature_str = str(sig)
 
         # Get the class that owns the method, if applicable
         cls_name = None
@@ -277,7 +279,7 @@ class FunctionTool(Component):
             description += f"Docstring: {docstring}\n"
 
         # Get function parameters schema
-        fn_parameters = get_fun_schema(name, self.fn)
+        fn_parameters = get_fun_schema(name, self.fn, sig=sig)
 
         name = cls_name + "_" + name if cls_name else name
         # create a unique identifier as the class method name
