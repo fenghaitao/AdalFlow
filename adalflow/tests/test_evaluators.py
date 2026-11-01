@@ -6,6 +6,10 @@ from adalflow.eval import (
     RetrieverEvaluator,
     LLMasJudge,
 )
+from adalflow.eval.functional import (
+    confidence_interval,
+    longest_common_substring,
+)
 
 
 def test_answer_match_acc():
@@ -96,3 +100,44 @@ def test_llm_as_judge():
     )
     assert avg_judgement == 2 / 3
     assert judgement_list == [True, True, False]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower <= upper <= 1.0
+    # Expected mean is 5/7 ~= 0.7142857
+    # For conf=0.95, z_critical ~= 1.95996
+    # SE = std(ddof=1) / sqrt(7) = 0.48795 / 2.64575 = 0.184428
+    # MoE = 1.95996 * 0.184428 = 0.36147
+    # lower ~= 0.3528, upper clipped to 1.0
+    assert 0.35 <= lower <= 0.36
+    assert upper == 1.0
+
+    # Test custom confidence level
+    lower_96, upper_96 = confidence_interval(judgements, confidence=0.96)
+    assert 0.33 <= lower_96 <= 0.34
+    assert upper_96 == 1.0
+
+    # Test error cases
+    with pytest.raises(ValueError, match="judgements must be a list"):
+        confidence_interval((1, 0, 1))
+
+    with pytest.raises(
+        ValueError, match="judgements must contain only integers or floats"
+    ):
+        confidence_interval(["1", "0"])
+
+    with pytest.raises(ValueError, match="confidence must be a number"):
+        confidence_interval([1, 0], confidence="high")
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval([1, 0], confidence=1.5)
+
+
+def test_longest_common_substring():
+    s1 = "abcdfghijk"
+    s2 = "abedfghxyz"
+    assert longest_common_substring(s1, s2) == "dfgh"
+    assert longest_common_substring("abc", "def") == ""
+    assert longest_common_substring("hello world", "world") == "world"
