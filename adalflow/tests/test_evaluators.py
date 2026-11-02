@@ -1,11 +1,13 @@
 import os
+
 import pytest
 
 from adalflow.eval import (
     AnswerMatchAcc,
-    RetrieverEvaluator,
     LLMasJudge,
+    RetrieverEvaluator,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -96,3 +98,37 @@ def test_llm_as_judge():
     )
     assert avg_judgement == 2 / 3
     assert judgement_list == [True, True, False]
+
+
+def test_confidence_interval():
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0 <= lower <= upper <= 1
+    # Check that higher confidence yields wider interval
+    lower_90, upper_90 = confidence_interval(judgements, confidence=0.90)
+    lower_99, upper_99 = confidence_interval(judgements, confidence=0.99)
+    assert lower_99 <= lower <= lower_90
+    assert upper_90 <= upper <= upper_99
+
+    # Edge case: single item
+    lower_single, upper_single = confidence_interval([1])
+    assert lower_single == 0
+    assert upper_single == 1
+
+    # Input validation checks
+    with pytest.raises(ValueError, match="judgements must be a list"):
+        confidence_interval("not a list")
+
+    with pytest.raises(
+        ValueError, match="judgements must contain only integers or floats"
+    ):
+        confidence_interval([1, "bad", 0])
+
+    with pytest.raises(ValueError, match="confidence must be a number"):
+        confidence_interval(judgements, confidence="high")
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval(judgements, confidence=0.0)
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval(judgements, confidence=1.0)
