@@ -1,11 +1,13 @@
 import os
 import pytest
 
+import math
 from adalflow.eval import (
     AnswerMatchAcc,
     RetrieverEvaluator,
     LLMasJudge,
 )
+from adalflow.eval.functional import confidence_interval
 
 
 def test_answer_match_acc():
@@ -96,3 +98,47 @@ def test_llm_as_judge():
     )
     assert avg_judgement == 2 / 3
     assert judgement_list == [True, True, False]
+
+
+def test_confidence_interval():
+    # Valid binary inputs
+    judgements = [1, 1, 0, 1, 0, 1, 1]
+    lower, upper = confidence_interval(judgements, confidence=0.95)
+    assert 0.0 <= lower <= 1.0
+    assert 0.0 <= upper <= 1.0
+    assert lower <= upper
+
+    # Verify analytical correctness
+    mean_score = 5 / 7
+    # variance with ddof=1: sum((x - 5/7)^2) / 6 = (5*(2/7)^2 + 2*(-5/7)^2) / 6 = 5/21
+    # se = sqrt(5/21) / sqrt(7) = sqrt(5/147)
+    std_err = math.sqrt((5 * (2 / 7) ** 2 + 2 * (5 / 7) ** 2) / 6) / math.sqrt(7)
+    # Z for 0.95 is ~1.959963984540054
+    expected_z = 1.959963984540054
+    expected_moe = expected_z * std_err
+    assert math.isclose(lower, max(0.0, mean_score - expected_moe), rel_tol=1e-6)
+    assert math.isclose(upper, min(1.0, mean_score + expected_moe), rel_tol=1e-6)
+
+    # Test confidence levels (higher confidence means wider interval)
+    l90, u90 = confidence_interval(judgements, confidence=0.90)
+    l99, u99 = confidence_interval(judgements, confidence=0.99)
+    assert l99 <= l90
+    assert u99 >= u90
+
+    # Input validations
+    with pytest.raises(ValueError, match="judgements must be a list"):
+        confidence_interval((1, 0, 1))
+
+    with pytest.raises(
+        ValueError, match="judgements must contain only integers or floats"
+    ):
+        confidence_interval(["a", "b"])
+
+    with pytest.raises(ValueError, match="confidence must be a number"):
+        confidence_interval(judgements, confidence="0.95")
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval(judgements, confidence=1.5)
+
+    with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
+        confidence_interval(judgements, confidence=-0.1)
