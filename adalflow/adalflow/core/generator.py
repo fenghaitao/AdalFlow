@@ -460,10 +460,16 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
 
         return output
 
-    def _pre_call(self, prompt_kwargs: Dict, model_kwargs: Dict) -> Dict[str, Any]:
+    def _pre_call(
+        self,
+        prompt_kwargs: Dict,
+        model_kwargs: Dict,
+        prompt_str: Optional[str] = None,
+    ) -> Dict[str, Any]:
         r"""Prepare the input, prompt_kwargs, model_kwargs for the model call."""
-        # 1. render the prompt from the template
-        prompt_str = self.get_prompt(**prompt_kwargs)
+        # 1. render the prompt from the template if not already rendered
+        if prompt_str is None:
+            prompt_str = self.get_prompt(**prompt_kwargs)
         # prompt = Prompt(template=self.template, prompt_kwargs=self.prompt_kwargs)
 
         # prompt_str = prompt.call(**prompt_kwargs).strip()
@@ -1244,7 +1250,10 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             log.debug(f"prompt_kwargs: {prompt_kwargs}")
             log.debug(f"model_kwargs: {model_kwargs}")
 
-            api_kwargs = self._pre_call(prompt_kwargs, model_kwargs)
+            # Pass the already rendered prompt_str to avoid redundant Jinja2 rendering in _pre_call
+            api_kwargs = self._pre_call(
+                prompt_kwargs, model_kwargs, prompt_str=prompt_str
+            )
 
             log.debug(f"api_kwargs: {api_kwargs}")
             output: GeneratorOutputType = None
@@ -1334,7 +1343,10 @@ class Generator(GradComponent, CachedEngine, CallbackManager):
             log.info(f"prompt_kwargs: {prompt_kwargs}")
             log.info(f"model_kwargs: {model_kwargs}")
 
-            api_kwargs = self._pre_call(prompt_kwargs, model_kwargs)
+            # Pass the already rendered prompt_str to avoid redundant Jinja2 rendering in _pre_call
+            api_kwargs = self._pre_call(
+                prompt_kwargs, model_kwargs, prompt_str=prompt_str
+            )
             output: GeneratorOutputType = None
             # call the model client
             completion = None
