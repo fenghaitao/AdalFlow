@@ -1,0 +1,3 @@
+## 2025-02-14 - Replace Monte Carlo normal percentile with exact analytical NormalDist inv_cdf
+**Learning:** `confidence_interval` in `adalflow.eval.functional` was simulating 1,000,000 normal random samples (`np.random.normal(0, 1, 1000000)`) on every call to find the z-critical value via `np.percentile`. This allocated ~8 MB memory and took ~54 ms per call. Using `statistics.NormalDist().inv_cdf` is exact, deterministic, avoids array allocation, and runs in ~0.05 ms (~1,000x faster).
+**Action:** Always prefer standard library analytical distributions (`statistics.NormalDist`) over empirical random sampling for standard critical value calculations.
